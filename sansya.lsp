@@ -18,9 +18,10 @@
 ;;  Ver.1.13 2017.11.08 小円弧分割調整
 ;;  Ver.1.14 2018.08.20 userr1
 ;  Ver.1.15 2026.07.07 点指示による境界自動検出(非閉領域対応)、ini堅牢化、選択・集計チェック強化
-;  Ver.1.16 2026.07.07 高速化(iniメモリキャッシュ・レイヤ一覧の再取得削減・描画をentmake化)
+;  Ver.1.16 2026.07.07 高速化(iniメモリキャッシュ・レイヤ一覧の再取得削減)
+;  Ver.1.17 2026.07.07 凹形状の三斜分割の無限ループ(砂時計)修正、エラーログ/退化三角形スキップ追加
 ;----------------------------------
-(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.16 2026.7.7")
+(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.17 2026.7.7")
 (setq cfgfname (strcat (substr (getvar "ACADPREFIX") 1 2) "/klib/klib.cfg"))
 (cond
    ((findfile cfgfname)
@@ -35,6 +36,7 @@
 )
 ;------------------------------------------------------------
 (defun C:SANSYA( / sansyamh scl zudata zuname kidiaopen what )
+   (vl-load-com)                ;vl-catch-all-* を有効化  Ver.1.17
    (setq *san_ini_cache* nil)   ;起動毎にini再読込(外部変更に追従)  Ver.1.16
    (if (= nil (tblsearch "BLOCK" "AMARK"))(mk_amark))
    (if (null (tblsearch "LAYER" "AREA1"))(_setlayer "AREA1" "CONTINUOUS" 3))   ;areahulay
@@ -277,7 +279,7 @@
      (progn
       (setq verlst (getlwpoarcver_autoseg zudata arcseg))
       (setq verlst (orderlst verlst))
-      (setq hyoulst (sansyakouji  verlst clay ))
+      (setq hyoulst (san_denil (sansyakouji  verlst clay )))
       (hyoukouji  hyoulst clay osm )
      )
      (prompt "\n閉じたポリラインではないため処理できません。")
@@ -398,7 +400,7 @@
 ;三斜自動作図工事
 (defun sansyakouji( verlst clay / 
                     pnum vislst m h i j taimin tai imin p newver newvis badlst alllst 
-                    hyoulst ii bufflst)
+                    hyoulst ii bufflst sg sgmax)
    (setq pnum (length verlst))
    (setq hyoulst '())
    (setq bufflst (readsanini))
@@ -479,6 +481,7 @@
             )
             (setq pplst (cdr pplst))
          )
+         (if (null pp)(setq pp 0))                      ;耳が無い時の保険  Ver.1.17
          (setq hyoulst (append hyoulst (list
             (sansyadraw_flst  pp verlst)  )))
          (setq verlst (san_dellst verlst pp))
@@ -486,18 +489,29 @@
          (while (< 3 m)
             (setq applst '())
             (setq mmm 1)
-            (while (> 2 (length applst))
-               (setq tempp (+ pp (* (expt -1 mmm)(/ mmm 2))))    ;0 1 -1 2 -2 3 -3 
+            (setq sg 0)                                 ;走査ガード  Ver.1.17
+            (setq sgmax (+ 2 (* 2 (length verlst))))    ;全頂点を走査し切る回数
+            (while (and (> 2 (length applst))(< sg sgmax))   ;無限ループ防止  Ver.1.17
+               (setq tempp (+ pp (* (expt -1 mmm)(/ mmm 2))))    ;0 1 -1 2 -2 3 -3
                (if (tennasi_flst tempp verlst alllst)
                   (if (< (setq tempk (kakudo tempp verlst)) 180.0)
                      (setq applst (append applst (list (list tempp (abs (- tempk 60.0))))))
                   )
                )
                (setq mmm (1+ mmm))
+               (setq sg (1+ sg))
             )
-            (if (<= (cadr (car applst))(cadr (cadr applst)))    ;60度に近い点を選択
-               (setq pp (car (car applst)))
-               (setq pp (car (cadr applst)))
+            (cond                                       ;候補0/1/2で分岐  Ver.1.17
+               ((<= 2 (length applst))
+                  (if (<= (cadr (car applst))(cadr (cadr applst)))    ;60度に近い点を選択
+                     (setq pp (car (car applst)))
+                     (setq pp (car (cadr applst)))
+                  )
+               )
+               ((= 1 (length applst))
+                  (setq pp (car (car applst)))          ;耳が1つ:それを使う
+               )
+               (T (setq pp (1+ pp)))                    ;耳が無い:隣へ進めハング回避
             )
             (setq hyoulst (append hyoulst (list
                    (sansyadraw_flst  pp verlst)  )))
@@ -750,7 +764,46 @@
    (sansyadraw (nth p ptlst)(nth q ptlst)(nth r ptlst))
 )
 
-(defun sansyadraw ( pt0 pt1 pt2 / wd0 wd1 wd2
+(defun san_log ( msg / f fn )                       ;ログ出力  Ver.1.17
+   (setq fn (strcat SANSTN "sansya_log.txt"))
+   (if (setq f (open fn "a"))
+      (progn (write-line msg f)(close f))
+   )
+   (prompt (strcat "\n[SANSYA] " msg))
+   (princ)
+)
+(defun san_ptstr ( p )                              ;点の文字列化
+   (strcat "(" (rtos (car p) 2 1) "," (rtos (cadr p) 2 1) ")")
+)
+(defun san_denil ( lst / r )                        ;nilを除いたリスト
+   (foreach x lst (if x (setq r (append r (list x)))))
+   r
+)
+;三角形描画のラッパ:退化(面積0)はスキップ、エラーは捕捉してログ  Ver.1.17
+(defun sansyadraw ( pt0 pt1 pt2 / res area2 )
+   (setq area2 (abs (- (* (- (car pt1)(car pt0))(- (cadr pt2)(cadr pt0)))
+                       (* (- (car pt2)(car pt0))(- (cadr pt1)(cadr pt0))))))
+   (cond
+      ((< area2 1e-6)
+         (san_log (strcat "退化三角形をスキップ "
+                          (san_ptstr pt0)(san_ptstr pt1)(san_ptstr pt2)))
+         nil
+      )
+      (T
+         (setq res (vl-catch-all-apply 'sansyadraw_raw (list pt0 pt1 pt2)))
+         (if (vl-catch-all-error-p res)
+            (progn
+               (san_log (strcat "描画エラー: " (vl-catch-all-error-message res) " @ "
+                                (san_ptstr pt0)(san_ptstr pt1)(san_ptstr pt2)))
+               nil
+            )
+            res
+         )
+      )
+   )
+)
+
+(defun sansyadraw_raw ( pt0 pt1 pt2 / wd0 wd1 wd2
                     l0 l1 l2 ll ang0 ppt0 ppt1 ppt2 kouten cyupt s-attreg s-attdia )
    (setq l0 (distance pt0 pt1))
    (setq l1 (distance pt1 pt2))

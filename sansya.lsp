@@ -17,8 +17,9 @@
 ;;  Ver.1.12 2011.01.13 集計方法少し変更
 ;;  Ver.1.13 2017.11.08 小円弧分割調整
 ;;  Ver.1.14 2018.08.20 userr1
+;  Ver.1.15 2026.07.07 点指示による境界自動検出(非閉領域対応)、ini堅牢化、選択・集計チェック強化
 ;----------------------------------
-(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.14 2018.8.20")
+(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.15 2026.7.7")
 (setq cfgfname (strcat (substr (getvar "ACADPREFIX") 1 2) "/klib/klib.cfg"))
 (cond
    ((findfile cfgfname)
@@ -54,12 +55,7 @@
    (if (= nil (tblsearch "BLOCK" "AMARK"))(mk_amark))
    (graphscr)
    (cond
-      ((= what 1)
-         (prompt "三斜面積計算を自動作図します。\n閉ポリラインの")
-         (setq zudata (entget (ssname (ssget) 0)))
-         (setq zuname (cdr (assoc 0 zudata)))
-         (if (= zuname "LWPOLYLINE")(sansyamk zudata $keynum))
-      )
+      ((= what 1) (sansyaauto))
       ((= what 2) (kobetukouji))
       ((= what 3) (syukei))
    )
@@ -280,6 +276,7 @@
       (setq hyoulst (sansyakouji  verlst clay ))
       (hyoukouji  hyoulst clay osm )
      )
+     (prompt "\n閉じたポリラインではないため処理できません。")
    )
    (setvar "CLAYER" clay)
    (setvar "BLIPMODE" blp)
@@ -287,6 +284,111 @@
    (setvar "OSMODE" osm)
    (setvar "ORTHOMODE" ort)
    (command "_undo" "E")
+)
+
+
+;三斜自動作図(閉ポリライン選択 または 領域内の点指示)  Ver.1.15
+;  閉じた図形を選択すれば従来どおり。何も選ばず点を指示すると、
+;  線分・円弧・ポリライン等で囲まれた領域(添付図のような割線で区切られた
+;  領域)でも、BOUNDARYで境界を自動検出して三斜計算できる。
+(defun sansyaauto( / sel zudata zuname)
+   (prompt "\n三斜面積計算(自動作図)")
+   (initget "Point")
+   (setq sel (entsel "\n閉じた図形を選択、または領域内を[点指示(P)] <点指示>: "))
+   (cond
+      ((null sel) (sansyabypoint))
+      ((eq (type sel) 'STR) (sansyabypoint))          ;キーワード"Point"
+      ((eq (type sel) 'LIST)
+         (setq zudata (entget (car sel)))
+         (setq zuname (cdr (assoc 0 zudata)))
+         (if (and (= zuname "LWPOLYLINE")
+                  (= 1 (logand (cond ((cdr (assoc 70 zudata)))(0)) 1)))
+            (sansyamk zudata $keynum)
+            (progn
+               (prompt "\n閉じたポリラインではありません。領域内の点で計算します。")
+               (sansyabypoint)
+            )
+         )
+      )
+   )
+   (princ)
+)
+
+;点指示で境界を自動検出して三斜作図  Ver.1.15
+;  各領域の内側を順にクリックすると、その領域ごとに三斜分割・作表する。
+(defun sansyabypoint( / pt created bpl bzudata cnt osm blp oce ort clay0 e)
+   (setq oce (getvar "CMDECHO"))
+   (setq blp (getvar "BLIPMODE"))
+   (setq osm (getvar "OSMODE"))
+   (setq ort (getvar "ORTHOMODE"))
+   (setq clay0 (getvar "CLAYER"))
+   (setvar "CMDECHO" 0)
+   (setvar "BLIPMODE" 0)
+   (setvar "OSMODE" 0)
+   (command "_undo" "BE")
+   (setq cnt 0)
+   (prompt "\n区切られた各領域の内側を順に指示してください(Enter/ESCで終了)。")
+   (while (setq pt (getpoint "\n領域内の点を指示 <終了>: "))
+      (setq created (sansya_makeboundary pt))
+      (if created
+        (progn
+         (setq bpl (car created))
+         (foreach e created
+            (if (> (sansya_entarea e)(sansya_entarea bpl))(setq bpl e))
+         )
+         (setq bzudata (entget bpl))
+         (if (and (= "LWPOLYLINE" (cdr (assoc 0 bzudata)))
+                  (= 1 (logand (cond ((cdr (assoc 70 bzudata)))(0)) 1)))
+           (progn
+            (foreach e created (entdel e))          ;一時境界線を消去してから作図
+            (sansyamk bzudata $keynum)
+            (setq cnt (1+ cnt))
+            (prompt (strcat "\n" (itoa cnt) " 領域目を作図しました。"))
+           )
+           (progn
+            (foreach e created (entdel e))
+            (prompt "\n閉じた境界を検出できませんでした。")
+           )
+         )
+        )
+         (prompt "\n境界を検出できませんでした。閉じた領域の内側を指示してください。")
+      )
+   )
+   (setvar "CLAYER" clay0)
+   (setvar "OSMODE" osm)
+   (setvar "BLIPMODE" blp)
+   (setvar "CMDECHO" oce)
+   (setvar "ORTHOMODE" ort)
+   (command "_undo" "E")
+   (if (< 0 cnt)
+      (prompt (strcat "\n計 " (itoa cnt) " 領域を処理しました。"))
+      (prompt "\n処理された領域はありません。")
+   )
+   (princ)
+)
+
+;指示点を囲む境界をBOUNDARYで生成し、作成エンティティのリストを返す  Ver.1.15
+(defun sansya_makeboundary( pt / before after created e)
+   (setq before (entlast))
+   (command "_.-boundary" pt "")
+   (setq after (entlast))
+   (setq created '())
+   (if (and after (not (eq after before)))
+      (progn
+         (setq e (if before (entnext before) (entnext)))
+         (while e
+            (setq created (append created (list e)))
+            (setq e (entnext e))
+         )
+      )
+   )
+   created
+)
+
+;エンティティの面積(絶対値)を返す  Ver.1.15
+(defun sansya_entarea( e / )
+   (command "_.area" "_O" e)
+   (abs (getvar "AREA"))
 )
 
 ;三斜自動作図工事
@@ -409,7 +511,7 @@
 
 ;三斜個別作図工事
 (defun kobetukouji( / vislst m h i j taimin tai imin p newver newvis badlst alllst 
-                      hyoulst ii bufflst  oce blp osm clay loop pt0 pt1 pt2)
+                      hyoulst ii bufflst  oce blp osm clay loop pt0 pt1 pt2 cnt)
    (command "_undo" "BE")
    (setq oce (getvar "CMDECHO"))
    (setq blp (getvar "BLIPMODE"))
@@ -432,9 +534,11 @@
    (setq areaselay  (nth 14 bufflst))         ; "表罫線字"
    (setq areatalay  (nth 15 bufflst))         ; "区分高さ画層"
 
+   (prompt "\n三斜個別作図：三角形の3点を順に指示します(1点目でEnter/ESCで終了)。")
+   (setq cnt 0)
    (setq loop T)
    (while loop
-      (setq pt0 (getpoint "\n一点目を指示："))
+      (setq pt0 (getpoint "\n1点目を指示 <終了>: "))
       (if (/= pt0 nil)
         (progn
          (setq pt1 (getpoint pt0 "\n二点目を指示："))
@@ -446,6 +550,8 @@
                (setvar "OSMODE" 0)
                (sansyadraw pt0 pt1 pt2)
                (setvar "OSMODE" osm)
+               (setq cnt (1+ cnt))
+               (prompt (strcat "\n" (itoa cnt) " 個目の三角形を作図しました。"))
               )
                (setq loop nil)
             )
@@ -455,6 +561,10 @@
         )
          (setq loop nil)
       )
+   )
+   (if (< 0 cnt)
+      (prompt (strcat "\n計 " (itoa cnt) " 個の三角形を作図しました。"))
+      (prompt "\n三角形は作図されませんでした。")
    )
    (setvar "CLAYER" clay)
    (setvar "BLIPMODE" blp)
@@ -545,7 +655,10 @@
          )
          (setq sortedlst (cdr sortedlst))
       )
-      (hyoukouji newlst clay osm)
+      (if (= 0 (length newlst))
+         (prompt "\n有効な面積記号(AMARK)が見つかりませんでした。")
+         (hyoukouji newlst clay osm)
+      )
      )
    )
    (setvar "CLAYER" clay)
@@ -1545,19 +1658,32 @@
 )
 ;
 ;ini読み出し
-(defun readsanini( / retlst f)
-   (setq retlst '())
+(defun readsanini( / rawlst retlst f buff defl i val)
+   ;iniを読み込み、旧版・破損・空欄フィールドは既定値で補完して
+   ;常に既定と同数の要素を返す(nth 参照でのエラーを防ぐ)  Ver.1.15
+   (setq rawlst '())
    (if (findfile (strcat SANSTN "sansya.ini"))
      (progn
       (if (setq f (open (strcat SANSTN "sansya.ini") "r"))
         (progn
          (while (setq buff (read-line f))
-            (setq retlst (append retlst (list buff)))
+            (setq rawlst (append rawlst (list buff)))
          )
          (close f)
         )
       )
      )
+   )
+   (setq defl (sandefini))
+   (setq retlst '())
+   (setq i 0)
+   (repeat (length defl)
+      (setq val (nth i rawlst))
+      (if (or (null val)(= val ""))
+         (setq val (nth i defl))
+      )
+      (setq retlst (append retlst (list val)))
+      (setq i (1+ i))
    )
    retlst
 )

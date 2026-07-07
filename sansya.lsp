@@ -21,8 +21,9 @@
 ;  Ver.1.16 2026.07.07 高速化(iniメモリキャッシュ・レイヤ一覧の再取得削減)
 ;  Ver.1.17 2026.07.07 凹形状の三斜分割の無限ループ(砂時計)修正、エラーログ/退化三角形スキップ追加
 ;  Ver.1.18 2026.07.07 既定値を更新、採番を「末尾数字を+1(多文字プレフィックス対応)」に変更
+;  Ver.1.19 2026.07.07 複数ポリライン選択に対応(まとめて1つの表・通し番号は連続)
 ;----------------------------------
-(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.18 2026.7.7")
+(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.19 2026.7.7")
 (setq cfgfname (strcat (substr (getvar "ACADPREFIX") 1 2) "/klib/klib.cfg"))
 (cond
    ((findfile cfgfname)
@@ -298,26 +299,67 @@
 ;  閉じた図形を選択すれば従来どおり。何も選ばず点を指示すると、
 ;  線分・円弧・ポリライン等で囲まれた領域(添付図のような割線で区切られた
 ;  領域)でも、BOUNDARYで境界を自動検出して三斜計算できる。
-(defun sansyaauto( / sel zudata zuname)
-   (prompt "\n三斜面積計算(自動作図)")
-   (initget "Point")
-   (setq sel (entsel "\n三斜計算する閉じたポリラインを選択 [領域内を点指示(P)]: "))
-   (cond
-      ((eq (type sel) 'STR) (sansyabypoint))          ;Pで点指示モード
-      ((eq (type sel) 'LIST)
-         (setq zudata (entget (car sel)))
-         (setq zuname (cdr (assoc 0 zudata)))
-         (if (and (= zuname "LWPOLYLINE")
-                  (= 1 (logand (cond ((cdr (assoc 70 zudata)))(0)) 1)))
-            (sansyamk zudata $keynum)                 ;閉ポリラインを一括で三斜
-            (progn
-               (prompt "\n閉じたポリラインではありません。領域内の点で計算します。")
-               (sansyabypoint)
-            )
+(defun sansyaauto( / ss)
+   (prompt "\n三斜計算する閉じたポリラインを選択(複数可、Enterで確定)。")
+   (setq ss (ssget '((0 . "LWPOLYLINE"))))
+   (if ss
+      (sansyamk_multi ss)
+      (progn
+         (initget "Yes No")
+         (if (= "Yes" (getkword "\n図形が未選択です。点指示モードにしますか? [Yes/No] <No>: "))
+            (sansyabypoint)
          )
       )
-      (T (prompt "\n図形が選択されませんでした。"))
    )
+   (princ)
+)
+
+;複数の閉じたポリラインをまとめて三斜分割し、1つの表に集計  Ver.1.19
+;  通し番号($keynum)は領域をまたいで連続。表は全領域を合算。
+(defun sansyamk_multi( ss / i n ename zudata verlst hyoulst allhyou
+                             oce blp osm ort clay cnt arcseg)
+   (command "_undo" "BE")
+   (setq oce (getvar "CMDECHO"))
+   (setq blp (getvar "BLIPMODE"))
+   (setq osm (getvar "OSMODE"))
+   (setq ort (getvar "ORTHOMODE"))
+   (setvar "CMDECHO" 0)
+   (setvar "BLIPMODE" 0)
+   (setvar "OSMODE" 0)
+   (setvar "ORTHOMODE" 0)
+   (setq clay (getvar "CLAYER"))
+   (setq allhyou '())
+   (setq cnt 0)
+   (setq n (sslength ss))
+   (setq i 0)
+   (repeat n
+      (setq ename (ssname ss i))
+      (setq zudata (entget ename))
+      (if (and (= "LWPOLYLINE" (cdr (assoc 0 zudata)))
+               (= 1 (logand (cond ((cdr (assoc 70 zudata)))(0)) 1)))
+        (progn
+         (setq arcseg (atof (r-arcseg)))
+         (setq verlst (getlwpoarcver_autoseg zudata arcseg))
+         (setq verlst (orderlst verlst))
+         (setq hyoulst (san_denil (sansyakouji verlst clay)))
+         (setq allhyou (append allhyou hyoulst))
+         (setq cnt (1+ cnt))
+        )
+        (san_log (strcat "閉じたポリラインでないためスキップ (選択" (itoa (1+ i)) "番目)"))
+      )
+      (setq i (1+ i))
+   )
+   (if allhyou
+      (hyoukouji allhyou clay osm)               ;全領域をまとめて1つの表に
+      (prompt "\n作図対象の閉じたポリラインがありませんでした。")
+   )
+   (setvar "CLAYER" clay)
+   (setvar "OSMODE" osm)
+   (setvar "BLIPMODE" blp)
+   (setvar "CMDECHO" oce)
+   (setvar "ORTHOMODE" ort)
+   (command "_undo" "E")
+   (prompt (strcat "\n" (itoa cnt) " 個の閉じたポリラインを処理し、1つの表にまとめました。"))
    (princ)
 )
 

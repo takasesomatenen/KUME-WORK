@@ -750,29 +750,8 @@
    (sansyadraw (nth p ptlst)(nth q ptlst)(nth r ptlst))
 )
 
-(defun san_lay( l ) (if (= l "<Œ»İ‘w>") clay l))
-;LINE ‚ğ entmake
-(defun san_emline( p1 p2 lay )
-   (entmake (list (cons 0 "LINE")(cons 8 lay)(cons 10 p1)(cons 11 p2)))
-)
-;•Â‚¶‚½OŠpŒ` LWPOLYLINE ‚ğ entmake (’¸“_‚Í2D‚É)
-(defun san_emtri( p0 p1 p2 lay )
-   (entmake (list (cons 0 "LWPOLYLINE")(cons 100 "AcDbEntity")(cons 8 lay)
-                  (cons 100 "AcDbPolyline")(cons 90 3)(cons 70 1)
-                  (cons 10 (list (car p0)(cadr p0)))
-                  (cons 10 (list (car p1)(cadr p1)))
-                  (cons 10 (list (car p2)(cadr p2)))))
-)
-;TEXT ‚ğ entmake  h72:…•½(1=’†‰› 2=‰E)  v73:‚’¼(1=‰º)  rot‚Íƒ‰ƒWƒAƒ“
-(defun san_emtext( pt h rot str h72 v73 lay )
-   (entmake (list (cons 0 "TEXT")(cons 8 lay)(cons 7 (getvar "TEXTSTYLE"))
-                  (cons 10 pt)(cons 11 pt)(cons 40 h)(cons 1 str)
-                  (cons 50 rot)(cons 72 h72)(cons 73 v73)))
-)
-
 (defun sansyadraw ( pt0 pt1 pt2 / wd0 wd1 wd2
-                    l0 l1 l2 ll ang0 ang1 leng0 leng1 ppt0 ppt1 ppt2 kouten cyupt
-                    sanareastr basestr s-attreq s-attdia marksz )
+                    l0 l1 l2 ll ang0 ppt0 ppt1 ppt2 kouten cyupt s-attreg s-attdia )
    (setq l0 (distance pt0 pt1))
    (setq l1 (distance pt1 pt2))
    (setq l2 (distance pt2 pt0))
@@ -788,32 +767,37 @@
    (setq kouten (inters ppt0 ppt1 ppt2 (polar ppt2 (- ang0 (* 0.5 pi)) 1.0) nil))
    (setq ang1 (angle kouten ppt2))
 
-   (san_emtri ppt0 ppt1 ppt2 (san_lay areakulay))          ;‹æ•ª}Œ`(•ÂOŠpŒ`)
-   (san_emline kouten ppt2 (san_lay areatalay))            ;‚‚³ü
+   (if (= areakulay "<Œ»İ‘w>") (setvar "CLAYER" clay)(setvar "CLAYER" areakulay))
+   (command "pline" ppt0 ppt1 ppt2 "c")
+   (if (= areatalay "<Œ»İ‘w>") (setvar "CLAYER" clay)(setvar "CLAYER" areatalay))
+   (command "line" kouten ppt2 "")
    (setq leng0 (distance ppt0 ppt1))
    (setq leng1 (distance kouten ppt2))
    (setq wd0 (areasRtos (* 0.001 leng0) 2 areaclup))       ;¬”“_Œ…”  mm to m
    (setq wd1 (areasRtos (* 0.001 leng1) 2 areaclup))       ;¬”“_Œ…”  mm to m
-
+   
    (if (= areasunp "sunpari")
      (progn
-      (san_emtext (polar (polar ppt0 ang0 (* 0.5 leng0))
-                     (+ ang0 (* 0.5 pi))(* scl areamosize 0.2))
-                  (* scl areamosize) ang0 wd0 1 1 (san_lay areamolay))
-      (san_emtext (polar (polar kouten ang1 (* 0.5 leng1))
-                     (+ ang1 (* 0.5 pi))(* scl areamosize 0.2))
-                  (* scl areamosize) ang1 wd1 1 1 (san_lay areamolay))
+      (if (= areamolay "<Œ»İ‘w>") (setvar "CLAYER" clay)(setvar "CLAYER" areamolay))
+      (command "text" "j" "BC" (polar (polar ppt0 ang0 (* 0.5 leng0))
+                            (+ ang0 (* 0.5 pi))(* scl areamosize 0.2)) 
+                            (* scl areamosize)(/ (* 180.0 ang0) pi) wd0)
+      (command "text" "j" "BC" (polar (polar kouten ang1 (* 0.5 leng1))
+                            (+ ang1 (* 0.5 pi))(* scl areamosize 0.2)) 
+                            (* scl areamosize)(/ (* 180.0 ang1) pi) wd1)
      )
    )
 
    (setq sanareastr (areasRtos (* (distof wd0 2) (distof wd1 2) 0.5) 2 areaclup))
    (setq basestr (strcat wd0 "~" wd1 "€2"))
 
-   (setvar "CLAYER" (san_lay areahulay))
-   (setq marksz (* scl (atof (nth 0 (readsanini)))))       ;ini‚ÍƒLƒƒƒbƒVƒ…QÆ
+   (if (= areahulay "<Œ»İ‘w>")
+      (setvar "CLAYER" clay)
+      (setvar "CLAYER" areahulay)
+   )
    (setq s-attreq (getvar "ATTREQ"))(setvar "ATTREQ" 1)
    (setq s-attdia (getvar "ATTDIA"))(setvar "ATTDIA" 0)
-   (command "insert" "amark" cyupt marksz  ""  "0.0"
+   (command "insert" "amark" cyupt (* scl (atof (nth 0 (readsanini))))  ""  "0.0" 
          sanareastr  basestr "" "" $keynum)
    (setvar "ATTREQ" s-attreq)
    (setvar "ATTDIA" s-attdia)
@@ -862,18 +846,16 @@
 )
 
 ;ì•\H–
-(defun hyoukouji( hyoulst clay osm / ii mm goukei ptpt pt1
-                  bufflst strwide colheight colwide1 colwide2 colwide3
-                  areaclup areakiri areaselay areahmlay tatel yokol
-                  mojib linept wdslst sanareastr goukeistr goukeistr2 goukeistr3
-                  slay hlay )  ;Ver.1.16 ‚‘¬‰»(entmake‰»)
-   (defun cyoutext( h72 v73 ptt hh kaku wd / ftname pos )
+(defun hyoukouji( hyoulst clay osm / ii mm  goukei osm keynum ptpt pt1)  ;Ver.1.07
+   (defun cyoutext( jj pos ptt hh kaku wd / ftname)
+     (progn
       (setq ftname (strcase (cdr (assoc 3 (tblsearch "STYLE" (getvar "TEXTSTYLE"))))))
-      (if (and (= "1" (substr wd (strlen wd) 1))(= "SIMPLEX" ftname))   ;Ver.1.04 1.06
-         (setq pos (pt ptt (* strwide -0.3) 0.0))
-         (setq pos ptt)
+      (if (and (= "1" (substr wd (strlen wd) 1))
+                  (= "SIMPLEX" ftname))                          ;Ver.1.04  Ver.1.06
+         (command "text" jj pos  (pt ptt (* strwide -0.3) 0.0) hh kaku wd)
+         (command "text" jj pos  ptt hh kaku wd)
       )
-      (san_emtext pos hh kaku wd h72 v73 hlay)
+     )
    )
    (setq bufflst (readsanini))
    (setq strwide  (* scl (atof (nth 1 bufflst))))        ; "•¶š‚Ì‘å‚«‚³"
@@ -882,76 +864,102 @@
    (setq colwide2 (* scl (atof (nth 4 bufflst))))        ; "ª‹’ƒZƒ‹‚Ì•"
    (setq colwide3 (* scl (atof (nth 5 bufflst))))        ; "–ÊÏƒZƒ‹‚Ì•"
    (setq areaclup  (atoi (nth 8 bufflst)))   ; "•\¦Œ…”"
-   (setq areakiri        (nth 9 bufflst)) ; "•\¦Œ…”ˆÈ‰º"
+   (setq areakiri        (nth 9 bufflst)) ; "•\¦Œ…”ˆÈ‰º"  "kiri_age"  "kiri_shisya"  "kiri_sute"
    (setq areaselay  (nth 14 bufflst))        ; "•\Œrü‰æ‘w"
    (setq areahmlay  (nth 16 bufflst))        ; "•\•¶š‰æ‘w"
-   (setq slay (san_lay areaselay))           ;Œrü‘w
-   (setq hlay (san_lay areahmlay))           ;•¶š‘w
 
    (setq mm (length hyoulst))
    (setq tatel (* (+ 5 mm) colheight))
    (setq yokol (+ colwide1 colwide2 colwide3))
-
+   
    (setvar "OSMODE" osm)
+;   (setq ptpt (sanhyoumove tatel yokol))
    (while (= ptpt nil) (setq ptpt (sanhyoumove tatel yokol)))    ;Ver.1.05
    (setvar "OSMODE" 0)
-
+   
    (setq ii 1)
    (setq goukei 0.0)
    (setq pt1 ptpt)
    (setq mojib (* 0.5 (- colheight strwide)))
-   (san_emline pt1 (pt pt1 yokol 0.0) slay)
+   (if (= areaselay "<Œ»İ‘w>")(setvar "CLAYER" clay)(setvar "CLAYER" areaselay))   ;Œrü
+   (command "line" pt1 (pt pt1 yokol 0.0) "")
 
    (setq linept (polar pt1 (* 1.5 pi) (* colheight ii)))
-   (san_emline linept (pt linept yokol 0.0) slay)
-   (san_emtext (pt linept (* 0.5 colwide1) mojib) strwide 0.0 "‹L†" 1 1 hlay)
-   (san_emtext (pt linept (+ colwide1 (* 0.25 colwide2)) mojib) strwide 0.0 "’ê•Óimj" 1 1 hlay)
-   (san_emtext (pt linept (+ colwide1 (* 0.75 colwide2)) mojib) strwide 0.0 "‚‚³imj" 1 1 hlay)
-   (san_emtext (pt linept (+ colwide1 colwide2 (* 0.5 colwide3)) mojib) strwide 0.0 "–ÊÏi‡uj" 1 1 hlay)
+   (command "line" linept (pt linept yokol 0.0) "")
+   (if (= areahmlay "<Œ»İ‘w>")(setvar "CLAYER" clay)(setvar "CLAYER" areahmlay))   ;•¶š
+   (command "text" "J" "bc" (pt linept (* 0.5 colwide1) mojib) strwide 0.0 "‹L†")
+   (command "text" "J" "bc" (pt linept (+ colwide1 (* 0.25 colwide2)) mojib) 
+      strwide 0.0 "’ê•Óimj")
+   (command "text" "J" "bc" (pt linept (+ colwide1 (* 0.75 colwide2)) mojib) 
+      strwide 0.0 "‚‚³imj")
+   (command "text" "J" "bc" (pt linept (+ colwide1 colwide2 (* 0.5 colwide3)) mojib) 
+      strwide 0.0 "–ÊÏi‡uj")
    (setq pt1 linept)
    (while (setq wdslst (car hyoulst))
       (setq linept (polar pt1 (* 1.5 pi) (* colheight ii)))
-      (san_emline linept (pt linept yokol 0.0) slay)
-      (cyoutext 2 1 (pt linept (- colwide1 strwide) mojib) strwide 0.0 (nth 2 wdslst))
-      (cyoutext 2 1 (pt linept (+ colwide1 (- (* 0.5 colwide2) strwide)) mojib) strwide 0.0 (car wdslst))
-      (cyoutext 2 1 (pt linept (+ colwide1 (- colwide2 strwide)) mojib) strwide 0.0 (cadr wdslst))
-      (setq sanareastr (areasRtos (* (distof (car wdslst) 2) (distof (cadr wdslst) 2)) 2 (* 2 areaclup)))
+      (if (= areaselay "<Œ»İ‘w>")(setvar "CLAYER" clay)(setvar "CLAYER" areaselay))   ;Œrü
+      (command "line" linept (pt linept yokol 0.0) "")
+      (if (= areahmlay "<Œ»İ‘w>")(setvar "CLAYER" clay)(setvar "CLAYER" areahmlay))   ;•¶š
+      (cyoutext "J" "br" (pt linept (- colwide1 strwide) mojib) strwide 0.0 (nth 2 wdslst))
+      (cyoutext "J" "br" (pt linept (+ colwide1 (- (* 0.5 colwide2) strwide)) mojib) 
+         strwide 0.0 (car wdslst))
+      (cyoutext "J" "br" (pt linept (+ colwide1 (- colwide2 strwide)) mojib) 
+         strwide 0.0 (cadr wdslst))
+      (setq sanareastr (areasRtos (* (distof (car wdslst) 2) (distof (cadr wdslst) 2)) 
+         2 (* 2 areaclup)))
       (setq goukei (+ goukei (distof sanareastr 2)))
-      (cyoutext 2 1 (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) strwide 0.0 sanareastr)
+      (cyoutext "J" "br" (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) 
+         strwide 0.0 sanareastr)
       (setq hyoulst (cdr hyoulst))
       (setq ii (1+ ii))
    )
    (setq linept (polar pt1 (* 1.5 pi) (* colheight ii)))
    (setq goukeistr (areasRtos goukei 2 (* 2 areaclup)))
-   (san_emtext (pt linept (+ colwide1 (- colwide2 strwide)) mojib) strwide 0.0 "Œv" 2 1 hlay)
-   (san_emtext (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) strwide 0.0 goukeistr 2 1 hlay)
-   (san_emline linept (pt linept yokol 0.0) slay)
+   (if (= areahmlay "<Œ»İ‘w>")(setvar "CLAYER" clay)(setvar "CLAYER" areahmlay))   ;•¶š
+   (command "text" "J" "br" (pt linept (+ colwide1 (- colwide2 strwide)) mojib) 
+      strwide 0.0 "Œv")
+   (command "text" "J" "br" (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) 
+      strwide 0.0 goukeistr)
+   (if (= areaselay "<Œ»İ‘w>")(setvar "CLAYER" clay)(setvar "CLAYER" areaselay))   ;Œrü
+   (command "line" linept (pt linept yokol 0.0) "")
    (setq ii (1+ ii))
 
    (setq linept (polar pt1 (* 1.5 pi) (* colheight ii)))
    (setq goukeistr2 (areasRtos (* 0.5 goukei) 2 (* 2 areaclup)))
-   (san_emtext (pt linept (+ colwide1 (- colwide2 strwide)) mojib) strwide 0.0 "1/2" 2 1 hlay)
-   (san_emtext (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) strwide 0.0 goukeistr2 2 1 hlay)
-   (san_emline linept (pt linept yokol 0.0) slay)
+   (if (= areahmlay "<Œ»İ‘w>")(setvar "CLAYER" clay)(setvar "CLAYER" areahmlay))   ;•¶š
+   (command "text" "J" "br" (pt linept (+ colwide1 (- colwide2 strwide)) mojib) 
+      strwide 0.0 "1/2")
+   (command "text" "J" "br" (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) 
+      strwide 0.0 goukeistr2)
+   (if (= areaselay "<Œ»İ‘w>")(setvar "CLAYER" clay)(setvar "CLAYER" areaselay))   ;Œrü
+   (command "line" linept (pt linept yokol 0.0) "")
    (setq ii (1+ ii))
 
    (setq linept (polar pt1 (* 1.5 pi) (* colheight ii)))
    (setq goukeistr3 (areasRtos (distof goukeistr2) 2 areaclup))
    (repeat areaclup (setq goukeistr3 (strcat goukeistr3 " ")))
-   (san_emtext (pt linept (+ colwide1 (- colwide2 strwide)) mojib) strwide 0.0 "‡Œv–ÊÏi‡uj" 2 1 hlay)
-   (san_emtext (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) strwide 0.0 goukeistr3 2 1 hlay)
-   (san_emline linept (pt linept yokol 0.0) slay)
+   (if (= areahmlay "<Œ»İ‘w>")(setvar "CLAYER" clay)(setvar "CLAYER" areahmlay))   ;•¶š
+   (command "text" "J" "br" (pt linept (+ colwide1 (- colwide2 strwide)) mojib) 
+      strwide 0.0 "‡Œv–ÊÏi‡uj")
+;
+;   (cyoutext "J" "br" (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) 
+;      strwide 0.0 goukeistr3)
+;
+   (command "text" "J" "br" (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) 
+      strwide 0.0 goukeistr3)
 
-   (san_emline ptpt (pt ptpt 0.0 (- (* (+ 4 mm) colheight))) slay)
+   (if (= areaselay "<Œ»İ‘w>")(setvar "CLAYER" clay)(setvar "CLAYER" areaselay))   ;Œrü
+   (command "line" linept (pt linept yokol 0.0) "")
+
+   (command "line" ptpt (pt ptpt 0.0 (- (* (+ 4 mm) colheight))) "")
    (setq pt1 (pt ptpt colwide1 0.0))
-   (san_emline pt1 (pt pt1 0.0 (- (* (+ 1 mm) colheight))) slay)
+   (command "line" pt1 (pt pt1 0.0 (- (* (+ 1 mm) colheight))) "")
    (setq pt1 (pt ptpt (+ colwide1 (* 0.5 colwide2)) 0.0 ))
-   (san_emline pt1 (pt pt1 0.0 (- (* (+ 1 mm) colheight))) slay)
+   (command "line" pt1 (pt pt1 0.0 (- (* (+ 1 mm) colheight))) "")
    (setq pt1 (pt ptpt (+ colwide1 colwide2) 0.0 ))
-   (san_emline pt1 (pt pt1 0.0 (- (* (+ 4 mm) colheight))) slay)
+   (command "line" pt1 (pt pt1 0.0 (- (* (+ 4 mm) colheight))) "")
    (setq pt1 (pt ptpt (+ colwide1 colwide2 colwide3) 0.0 ))
-   (san_emline pt1 (pt pt1 0.0 (- (* (+ 4 mm) colheight))) slay)
-   (princ)
+   (command "line" pt1 (pt pt1 0.0 (- (* (+ 4 mm) colheight))) "")
 )
 
 ; Ÿ“_w¦A”ÍˆÍƒJ[ƒ\ƒ‹•t‚«

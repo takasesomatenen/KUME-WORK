@@ -20,8 +20,9 @@
 ;  Ver.1.15 2026.07.07 点指示による境界自動検出(非閉領域対応)、ini堅牢化、選択・集計チェック強化
 ;  Ver.1.16 2026.07.07 高速化(iniメモリキャッシュ・レイヤ一覧の再取得削減)
 ;  Ver.1.17 2026.07.07 凹形状の三斜分割の無限ループ(砂時計)修正、エラーログ/退化三角形スキップ追加
+;  Ver.1.18 2026.07.07 既定値を更新、採番を「末尾数字を+1(多文字プレフィックス対応)」に変更
 ;----------------------------------
-(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.17 2026.7.7")
+(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.18 2026.7.7")
 (setq cfgfname (strcat (substr (getvar "ACADPREFIX") 1 2) "/klib/klib.cfg"))
 (cond
    ((findfile cfgfname)
@@ -42,7 +43,7 @@
    (if (null (tblsearch "LAYER" "AREA1"))(_setlayer "AREA1" "CONTINUOUS" 3))   ;areahulay
    (if (null (tblsearch "LAYER" "AREA2"))(_setlayer "AREA2" "CONTINUOUS" 1))   ;areaselay
    (if (null (tblsearch "LAYER" "AREA3_TXT"))(_setlayer "AREA3_TXT" "CONTINUOUS" 3)) ;areamolay Ver.1.03
-   (if (= nil $keynum)(setq $keynum "1"))
+   (if (= nil $keynum)(setq $keynum "A1"))
    (if (null (findfile (strcat SANSTN "sansya.ini")))
       (setq what (sansyadialog (sandefini)))
       (setq what (sansyadialog (readsanini)))
@@ -175,7 +176,7 @@
    (defun actok2( / ) (actok) (done_dialog 2))     ;iniを書き込んで閉じる
    (defun actok3( / ) (actok) (done_dialog 3))     ;iniを書き込んで閉じる
 
-   (defun actdef( / ) (actdisp (sandefini)) )
+   (defun actdef( / ) (setq $keynum "A1")(actdisp (sandefini)) )
 
    (defun actdisp( lst / pl )
       (setq pl (cplaylst))                       ;レイヤ一覧は1回だけ取得  Ver.1.16
@@ -859,41 +860,34 @@
    (list wd0 wd1 wd2)    ;底辺 高さ キー番号の文字列リストを返す
 )
 
-(defun incban( numstr / ascinc ret)
-   (defun ascinc(asc / dic retasc)
-      (setq dic (ascii asc))
+(defun incban( numstr / incchar len i prefix np ret )
+   ;末尾の数字部分を+1、その手前の文字列(何文字でも)はそのまま  Ver.1.18
+   ; 例: A1->A2  AA1->AA2  AB1->AB2  1->2  A->B  AA->AB
+   (defun incchar( a / dic )
+      (setq dic (ascii a))
       (cond
-         ((and (<= 90 dic)(<= dic 96))(setq retasc (chr 97)))
-         ((and (<= 122 dic)(<= dic 127))(setq retasc (chr 65)))
-         (T (setq retasc (chr (1+ dic))))
+         ((and (<= 90 dic)(<= dic 96))(chr 97))     ; Z等 -> a
+         ((and (<= 122 dic)(<= dic 127))(chr 65))   ; z等 -> A
+         (T (chr (1+ dic)))
       )
-      retasc
    )
-;-------------------------------   
-   (if (> (atoi numstr) 0)
-     (progn
-      (setq ret (itoa (1+ (atoi numstr))))
-     )
-     (progn
-      (if (= 1 (strlen numstr))
-        (progn
-         (setq ret (ascinc numstr))
-        )
-        (progn
-         (setq hnum (substr numstr 1 1))
-         (setq subnum (substr numstr 2))
-         (if subnum
-           (progn
-            (setq subatno (atoi subnum))
-            (if (> subatno 0)
-               (setq ret (strcat hnum (itoa (+ (atoi subnum) 1))))
-               (setq ret (strcat hnum (ascinc subnum)))
-            )
-           )
-         )
-        )
+   (if (or (null numstr)(= numstr ""))(setq numstr "1"))
+   (setq len (strlen numstr))
+   (setq i len)
+   (while (and (> i 0)
+               (<= 48 (ascii (substr numstr i 1)))
+               (>= 57 (ascii (substr numstr i 1))))
+      (setq i (1- i))                         ; 末尾の数字列の先頭直前まで戻す
+   )
+   (setq prefix (substr numstr 1 i))          ; 数字より前(空可)
+   (setq np (substr numstr (1+ i)))           ; 末尾の数字列(空可)
+   (if (> (strlen np) 0)
+      (setq ret (strcat prefix (itoa (1+ (atoi np)))))   ; 数字部を+1
+      (if (= len 0)                                       ; 数字なし=英字扱い
+         (setq ret "1")
+         (setq ret (strcat (substr numstr 1 (1- len))
+                           (incchar (substr numstr len 1))))
       )
-     )
    )
    ret
 )
@@ -1710,8 +1704,8 @@
 (defun r-areakiri( / )   (nth 9 (readsanini)))
 (defun r-arcseg( / )     (nth 10 (readsanini)))
 (defun sandefini( / )
-   '("7.0" "3.0" "6.0" "10.0" "80.0" "40.0" "sunpari" "2.5" "3" "kiri_shisya" "1000"
-     "AREA2" "AREA1" "AREA3_TXT" "AREA2" "AREA2" "AREA3_TXT" )   ;Ver.1.03
+   '("600" "80" "200" "500" "1000" "1000" "sunpari" "200" "2" "kiri_shisya" "1000"
+     "AREA2" "AREA1" "AREA3_TXT" "AREA2" "AREA2" "AREA3_TXT" )   ;Ver.1.18 既定値更新
 )
 ;
 ;ini読み出し

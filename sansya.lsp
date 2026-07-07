@@ -298,22 +298,22 @@
 (defun sansyaauto( / sel zudata zuname)
    (prompt "\n三斜面積計算(自動作図)")
    (initget "Point")
-   (setq sel (entsel "\n閉じた図形を選択、または領域内を[点指示(P)] <点指示>: "))
+   (setq sel (entsel "\n三斜計算する閉じたポリラインを選択 [領域内を点指示(P)]: "))
    (cond
-      ((null sel) (sansyabypoint))
-      ((eq (type sel) 'STR) (sansyabypoint))          ;キーワード"Point"
+      ((eq (type sel) 'STR) (sansyabypoint))          ;Pで点指示モード
       ((eq (type sel) 'LIST)
          (setq zudata (entget (car sel)))
          (setq zuname (cdr (assoc 0 zudata)))
          (if (and (= zuname "LWPOLYLINE")
                   (= 1 (logand (cond ((cdr (assoc 70 zudata)))(0)) 1)))
-            (sansyamk zudata $keynum)
+            (sansyamk zudata $keynum)                 ;閉ポリラインを一括で三斜
             (progn
                (prompt "\n閉じたポリラインではありません。領域内の点で計算します。")
                (sansyabypoint)
             )
          )
       )
+      (T (prompt "\n図形が選択されませんでした。"))
    )
    (princ)
 )

@@ -18,8 +18,9 @@
 ;;  Ver.1.13 2017.11.08 小円弧分割調整
 ;;  Ver.1.14 2018.08.20 userr1
 ;  Ver.1.15 2026.07.07 点指示による境界自動検出(非閉領域対応)、ini堅牢化、選択・集計チェック強化
+;  Ver.1.16 2026.07.07 高速化(iniメモリキャッシュ・レイヤ一覧の再取得削減・描画をentmake化)
 ;----------------------------------
-(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.15 2026.7.7")
+(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.16 2026.7.7")
 (setq cfgfname (strcat (substr (getvar "ACADPREFIX") 1 2) "/klib/klib.cfg"))
 (cond
    ((findfile cfgfname)
@@ -34,6 +35,7 @@
 )
 ;------------------------------------------------------------
 (defun C:SANSYA( / sansyamh scl zudata zuname kidiaopen what )
+   (setq *san_ini_cache* nil)   ;起動毎にini再読込(外部変更に追従)  Ver.1.16
    (if (= nil (tblsearch "BLOCK" "AMARK"))(mk_amark))
    (if (null (tblsearch "LAYER" "AREA1"))(_setlayer "AREA1" "CONTINUOUS" 3))   ;areahulay
    (if (null (tblsearch "LAYER" "AREA2"))(_setlayer "AREA2" "CONTINUOUS" 1))   ;areaselay
@@ -88,7 +90,7 @@
       )
       flg
    )   
-   (defun actok( / check )
+   (defun actok( / check pl )
       (if (checksuuchi (get_tile "marksize"))
          (if (checksuuchi (get_tile "strwide"))
             (if (checksuuchi (get_tile "colhight"))
@@ -102,7 +104,7 @@
                                  (alert "円弧分割長に数値を入力してください")
                               )
                               (alert "表示桁数に数値を入力してください")
-                           )      
+                           )
                            (alert "図形内寸法文字の大きさに数値を入力してください")
                         )
                         (alert "面積セルの巾に数値を入力してください")
@@ -119,29 +121,30 @@
       )
       (if check
         (progn
+         (setq pl (cplaylst))                    ;レイヤ一覧は1回だけ取得  Ver.1.16
          (if (get_tile "areakulay")
-            (setq kulay (nth (atoi (get_tile "areakulay"))(cplaylst)))
-            (setq kulay (car (cplaylst)))
+            (setq kulay (nth (atoi (get_tile "areakulay")) pl))
+            (setq kulay (car pl))
          )
          (if (get_tile "areahulay")
-            (setq hulay (nth (atoi (get_tile "areahulay"))(cplaylst)))
-            (setq hulay (car (cplaylst)))
+            (setq hulay (nth (atoi (get_tile "areahulay")) pl))
+            (setq hulay (car pl))
          )
          (if (get_tile "areamolay")
-            (setq molay (nth (atoi (get_tile "areamolay"))(cplaylst)))
-            (setq molay (car (cplaylst)))
+            (setq molay (nth (atoi (get_tile "areamolay")) pl))
+            (setq molay (car pl))
          )
          (if (get_tile "areaselay")
-            (setq selay (nth (atoi (get_tile "areaselay"))(cplaylst)))
-            (setq selay (car (cplaylst)))
+            (setq selay (nth (atoi (get_tile "areaselay")) pl))
+            (setq selay (car pl))
          )
          (if (get_tile "areatalay")
-            (setq talay (nth (atoi (get_tile "areatalay"))(cplaylst)))
-            (setq talay (car (cplaylst)))
+            (setq talay (nth (atoi (get_tile "areatalay")) pl))
+            (setq talay (car pl))
          )
          (if (get_tile "areahmlay")
-            (setq hmlay (nth (atoi (get_tile "areahmlay"))(cplaylst)))
-            (setq hmlay (car (cplaylst)))
+            (setq hmlay (nth (atoi (get_tile "areahmlay")) pl))
+            (setq hmlay (car pl))
          )
          (setq retlst '())
          (setq retlst (append retlst (list (get_tile "marksize"))))
@@ -172,7 +175,8 @@
 
    (defun actdef( / ) (actdisp (sandefini)) )
 
-   (defun actdisp( lst / )
+   (defun actdisp( lst / pl )
+      (setq pl (cplaylst))                       ;レイヤ一覧は1回だけ取得  Ver.1.16
       (set_tile "marksize"  (nth 0 lst))
       (set_tile "strwide"   (nth 1 lst))
       (set_tile "colhight"  (nth 2 lst))
@@ -191,45 +195,45 @@
          ((= (nth 9 lst) "kiri_sute") (set_tile "areakiri" "kiri_sute"))
       )
       (set_tile "arcseg"   (nth 10 lst))
-      
+
       (start_list "areakulay")
-      (mapcar 'add_list (cplaylst))
+      (mapcar 'add_list pl)
       (end_list)
-      (if (setq buff (icchiban (cplaylst) (nth 11 lst)))
+      (if (setq buff (icchiban pl (nth 11 lst)))
          (set_tile "areakulay" (itoa buff))
       )
 
       (start_list "areahulay")
-      (mapcar 'add_list (cplaylst))
+      (mapcar 'add_list pl)
       (end_list)
-      (if (setq buff (icchiban (cplaylst) (nth 12 lst)))
+      (if (setq buff (icchiban pl (nth 12 lst)))
          (set_tile "areahulay" (itoa buff))
       )
 
       (start_list "areamolay")
-      (mapcar 'add_list (cplaylst))
+      (mapcar 'add_list pl)
       (end_list)
-      (if (setq buff (icchiban (cplaylst) (nth 13 lst)))
+      (if (setq buff (icchiban pl (nth 13 lst)))
          (set_tile "areamolay" (itoa buff))
       )
 
       (start_list "areaselay")
-      (mapcar 'add_list (cplaylst))
+      (mapcar 'add_list pl)
       (end_list)
-      (if (setq buff (icchiban (cplaylst) (nth 14 lst)))
+      (if (setq buff (icchiban pl (nth 14 lst)))
          (set_tile "areaselay" (itoa buff))
       )
 
       (start_list "areatalay")
-      (mapcar 'add_list (cplaylst))
+      (mapcar 'add_list pl)
       (end_list)
-      (if (setq buff (icchiban (cplaylst) (nth 15 lst)))
+      (if (setq buff (icchiban pl (nth 15 lst)))
          (set_tile "areatalay" (itoa buff))
       )
       (start_list "areahmlay")
-      (mapcar 'add_list (cplaylst))
+      (mapcar 'add_list pl)
       (end_list)
-      (if (setq buff (icchiban (cplaylst) (nth 16 lst)))
+      (if (setq buff (icchiban pl (nth 16 lst)))
          (set_tile "areahmlay" (itoa buff))
       )
       (set_tile "hugonum" $keynum)
@@ -746,8 +750,29 @@
    (sansyadraw (nth p ptlst)(nth q ptlst)(nth r ptlst))
 )
 
+(defun san_lay( l ) (if (= l "<現在層>") clay l))
+;LINE を entmake
+(defun san_emline( p1 p2 lay )
+   (entmake (list (cons 0 "LINE")(cons 8 lay)(cons 10 p1)(cons 11 p2)))
+)
+;閉じた三角形 LWPOLYLINE を entmake (頂点は2Dに)
+(defun san_emtri( p0 p1 p2 lay )
+   (entmake (list (cons 0 "LWPOLYLINE")(cons 100 "AcDbEntity")(cons 8 lay)
+                  (cons 100 "AcDbPolyline")(cons 90 3)(cons 70 1)
+                  (cons 10 (list (car p0)(cadr p0)))
+                  (cons 10 (list (car p1)(cadr p1)))
+                  (cons 10 (list (car p2)(cadr p2)))))
+)
+;TEXT を entmake  h72:水平(1=中央 2=右)  v73:垂直(1=下)  rotはラジアン
+(defun san_emtext( pt h rot str h72 v73 lay )
+   (entmake (list (cons 0 "TEXT")(cons 8 lay)(cons 7 (getvar "TEXTSTYLE"))
+                  (cons 10 pt)(cons 11 pt)(cons 40 h)(cons 1 str)
+                  (cons 50 rot)(cons 72 h72)(cons 73 v73)))
+)
+
 (defun sansyadraw ( pt0 pt1 pt2 / wd0 wd1 wd2
-                    l0 l1 l2 ll ang0 ppt0 ppt1 ppt2 kouten cyupt s-attreg s-attdia )
+                    l0 l1 l2 ll ang0 ang1 leng0 leng1 ppt0 ppt1 ppt2 kouten cyupt
+                    sanareastr basestr s-attreq s-attdia marksz )
    (setq l0 (distance pt0 pt1))
    (setq l1 (distance pt1 pt2))
    (setq l2 (distance pt2 pt0))
@@ -763,37 +788,32 @@
    (setq kouten (inters ppt0 ppt1 ppt2 (polar ppt2 (- ang0 (* 0.5 pi)) 1.0) nil))
    (setq ang1 (angle kouten ppt2))
 
-   (if (= areakulay "<現在層>") (setvar "CLAYER" clay)(setvar "CLAYER" areakulay))
-   (command "pline" ppt0 ppt1 ppt2 "c")
-   (if (= areatalay "<現在層>") (setvar "CLAYER" clay)(setvar "CLAYER" areatalay))
-   (command "line" kouten ppt2 "")
+   (san_emtri ppt0 ppt1 ppt2 (san_lay areakulay))          ;区分図形(閉三角形)
+   (san_emline kouten ppt2 (san_lay areatalay))            ;高さ線
    (setq leng0 (distance ppt0 ppt1))
    (setq leng1 (distance kouten ppt2))
    (setq wd0 (areasRtos (* 0.001 leng0) 2 areaclup))       ;小数点桁数  mm to m
    (setq wd1 (areasRtos (* 0.001 leng1) 2 areaclup))       ;小数点桁数  mm to m
-   
+
    (if (= areasunp "sunpari")
      (progn
-      (if (= areamolay "<現在層>") (setvar "CLAYER" clay)(setvar "CLAYER" areamolay))
-      (command "text" "j" "BC" (polar (polar ppt0 ang0 (* 0.5 leng0))
-                            (+ ang0 (* 0.5 pi))(* scl areamosize 0.2)) 
-                            (* scl areamosize)(/ (* 180.0 ang0) pi) wd0)
-      (command "text" "j" "BC" (polar (polar kouten ang1 (* 0.5 leng1))
-                            (+ ang1 (* 0.5 pi))(* scl areamosize 0.2)) 
-                            (* scl areamosize)(/ (* 180.0 ang1) pi) wd1)
+      (san_emtext (polar (polar ppt0 ang0 (* 0.5 leng0))
+                     (+ ang0 (* 0.5 pi))(* scl areamosize 0.2))
+                  (* scl areamosize) ang0 wd0 1 1 (san_lay areamolay))
+      (san_emtext (polar (polar kouten ang1 (* 0.5 leng1))
+                     (+ ang1 (* 0.5 pi))(* scl areamosize 0.2))
+                  (* scl areamosize) ang1 wd1 1 1 (san_lay areamolay))
      )
    )
 
    (setq sanareastr (areasRtos (* (distof wd0 2) (distof wd1 2) 0.5) 2 areaclup))
    (setq basestr (strcat wd0 "×" wd1 "÷2"))
 
-   (if (= areahulay "<現在層>")
-      (setvar "CLAYER" clay)
-      (setvar "CLAYER" areahulay)
-   )
+   (setvar "CLAYER" (san_lay areahulay))
+   (setq marksz (* scl (atof (nth 0 (readsanini)))))       ;iniはキャッシュ参照
    (setq s-attreq (getvar "ATTREQ"))(setvar "ATTREQ" 1)
    (setq s-attdia (getvar "ATTDIA"))(setvar "ATTDIA" 0)
-   (command "insert" "amark" cyupt (* scl (atof (nth 0 (readsanini))))  ""  "0.0" 
+   (command "insert" "amark" cyupt marksz  ""  "0.0"
          sanareastr  basestr "" "" $keynum)
    (setvar "ATTREQ" s-attreq)
    (setvar "ATTDIA" s-attdia)
@@ -842,16 +862,18 @@
 )
 
 ;作表工事
-(defun hyoukouji( hyoulst clay osm / ii mm  goukei osm keynum ptpt pt1)  ;Ver.1.07
-   (defun cyoutext( jj pos ptt hh kaku wd / ftname)
-     (progn
+(defun hyoukouji( hyoulst clay osm / ii mm goukei ptpt pt1
+                  bufflst strwide colheight colwide1 colwide2 colwide3
+                  areaclup areakiri areaselay areahmlay tatel yokol
+                  mojib linept wdslst sanareastr goukeistr goukeistr2 goukeistr3
+                  slay hlay )  ;Ver.1.16 高速化(entmake化)
+   (defun cyoutext( h72 v73 ptt hh kaku wd / ftname pos )
       (setq ftname (strcase (cdr (assoc 3 (tblsearch "STYLE" (getvar "TEXTSTYLE"))))))
-      (if (and (= "1" (substr wd (strlen wd) 1))
-                  (= "SIMPLEX" ftname))                          ;Ver.1.04  Ver.1.06
-         (command "text" jj pos  (pt ptt (* strwide -0.3) 0.0) hh kaku wd)
-         (command "text" jj pos  ptt hh kaku wd)
+      (if (and (= "1" (substr wd (strlen wd) 1))(= "SIMPLEX" ftname))   ;Ver.1.04 1.06
+         (setq pos (pt ptt (* strwide -0.3) 0.0))
+         (setq pos ptt)
       )
-     )
+      (san_emtext pos hh kaku wd h72 v73 hlay)
    )
    (setq bufflst (readsanini))
    (setq strwide  (* scl (atof (nth 1 bufflst))))        ; "文字の大きさ"
@@ -860,102 +882,76 @@
    (setq colwide2 (* scl (atof (nth 4 bufflst))))        ; "根拠セルの幅"
    (setq colwide3 (* scl (atof (nth 5 bufflst))))        ; "面積セルの幅"
    (setq areaclup  (atoi (nth 8 bufflst)))   ; "表示桁数"
-   (setq areakiri        (nth 9 bufflst)) ; "表示桁数以下"  "kiri_age"  "kiri_shisya"  "kiri_sute"
+   (setq areakiri        (nth 9 bufflst)) ; "表示桁数以下"
    (setq areaselay  (nth 14 bufflst))        ; "表罫線画層"
    (setq areahmlay  (nth 16 bufflst))        ; "表文字画層"
+   (setq slay (san_lay areaselay))           ;罫線層
+   (setq hlay (san_lay areahmlay))           ;文字層
 
    (setq mm (length hyoulst))
    (setq tatel (* (+ 5 mm) colheight))
    (setq yokol (+ colwide1 colwide2 colwide3))
-   
+
    (setvar "OSMODE" osm)
-;   (setq ptpt (sanhyoumove tatel yokol))
    (while (= ptpt nil) (setq ptpt (sanhyoumove tatel yokol)))    ;Ver.1.05
    (setvar "OSMODE" 0)
-   
+
    (setq ii 1)
    (setq goukei 0.0)
    (setq pt1 ptpt)
    (setq mojib (* 0.5 (- colheight strwide)))
-   (if (= areaselay "<現在層>")(setvar "CLAYER" clay)(setvar "CLAYER" areaselay))   ;罫線
-   (command "line" pt1 (pt pt1 yokol 0.0) "")
+   (san_emline pt1 (pt pt1 yokol 0.0) slay)
 
    (setq linept (polar pt1 (* 1.5 pi) (* colheight ii)))
-   (command "line" linept (pt linept yokol 0.0) "")
-   (if (= areahmlay "<現在層>")(setvar "CLAYER" clay)(setvar "CLAYER" areahmlay))   ;文字
-   (command "text" "J" "bc" (pt linept (* 0.5 colwide1) mojib) strwide 0.0 "記号")
-   (command "text" "J" "bc" (pt linept (+ colwide1 (* 0.25 colwide2)) mojib) 
-      strwide 0.0 "底辺（m）")
-   (command "text" "J" "bc" (pt linept (+ colwide1 (* 0.75 colwide2)) mojib) 
-      strwide 0.0 "高さ（m）")
-   (command "text" "J" "bc" (pt linept (+ colwide1 colwide2 (* 0.5 colwide3)) mojib) 
-      strwide 0.0 "面積（㎡）")
+   (san_emline linept (pt linept yokol 0.0) slay)
+   (san_emtext (pt linept (* 0.5 colwide1) mojib) strwide 0.0 "記号" 1 1 hlay)
+   (san_emtext (pt linept (+ colwide1 (* 0.25 colwide2)) mojib) strwide 0.0 "底辺（m）" 1 1 hlay)
+   (san_emtext (pt linept (+ colwide1 (* 0.75 colwide2)) mojib) strwide 0.0 "高さ（m）" 1 1 hlay)
+   (san_emtext (pt linept (+ colwide1 colwide2 (* 0.5 colwide3)) mojib) strwide 0.0 "面積（㎡）" 1 1 hlay)
    (setq pt1 linept)
    (while (setq wdslst (car hyoulst))
       (setq linept (polar pt1 (* 1.5 pi) (* colheight ii)))
-      (if (= areaselay "<現在層>")(setvar "CLAYER" clay)(setvar "CLAYER" areaselay))   ;罫線
-      (command "line" linept (pt linept yokol 0.0) "")
-      (if (= areahmlay "<現在層>")(setvar "CLAYER" clay)(setvar "CLAYER" areahmlay))   ;文字
-      (cyoutext "J" "br" (pt linept (- colwide1 strwide) mojib) strwide 0.0 (nth 2 wdslst))
-      (cyoutext "J" "br" (pt linept (+ colwide1 (- (* 0.5 colwide2) strwide)) mojib) 
-         strwide 0.0 (car wdslst))
-      (cyoutext "J" "br" (pt linept (+ colwide1 (- colwide2 strwide)) mojib) 
-         strwide 0.0 (cadr wdslst))
-      (setq sanareastr (areasRtos (* (distof (car wdslst) 2) (distof (cadr wdslst) 2)) 
-         2 (* 2 areaclup)))
+      (san_emline linept (pt linept yokol 0.0) slay)
+      (cyoutext 2 1 (pt linept (- colwide1 strwide) mojib) strwide 0.0 (nth 2 wdslst))
+      (cyoutext 2 1 (pt linept (+ colwide1 (- (* 0.5 colwide2) strwide)) mojib) strwide 0.0 (car wdslst))
+      (cyoutext 2 1 (pt linept (+ colwide1 (- colwide2 strwide)) mojib) strwide 0.0 (cadr wdslst))
+      (setq sanareastr (areasRtos (* (distof (car wdslst) 2) (distof (cadr wdslst) 2)) 2 (* 2 areaclup)))
       (setq goukei (+ goukei (distof sanareastr 2)))
-      (cyoutext "J" "br" (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) 
-         strwide 0.0 sanareastr)
+      (cyoutext 2 1 (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) strwide 0.0 sanareastr)
       (setq hyoulst (cdr hyoulst))
       (setq ii (1+ ii))
    )
    (setq linept (polar pt1 (* 1.5 pi) (* colheight ii)))
    (setq goukeistr (areasRtos goukei 2 (* 2 areaclup)))
-   (if (= areahmlay "<現在層>")(setvar "CLAYER" clay)(setvar "CLAYER" areahmlay))   ;文字
-   (command "text" "J" "br" (pt linept (+ colwide1 (- colwide2 strwide)) mojib) 
-      strwide 0.0 "計")
-   (command "text" "J" "br" (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) 
-      strwide 0.0 goukeistr)
-   (if (= areaselay "<現在層>")(setvar "CLAYER" clay)(setvar "CLAYER" areaselay))   ;罫線
-   (command "line" linept (pt linept yokol 0.0) "")
+   (san_emtext (pt linept (+ colwide1 (- colwide2 strwide)) mojib) strwide 0.0 "計" 2 1 hlay)
+   (san_emtext (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) strwide 0.0 goukeistr 2 1 hlay)
+   (san_emline linept (pt linept yokol 0.0) slay)
    (setq ii (1+ ii))
 
    (setq linept (polar pt1 (* 1.5 pi) (* colheight ii)))
    (setq goukeistr2 (areasRtos (* 0.5 goukei) 2 (* 2 areaclup)))
-   (if (= areahmlay "<現在層>")(setvar "CLAYER" clay)(setvar "CLAYER" areahmlay))   ;文字
-   (command "text" "J" "br" (pt linept (+ colwide1 (- colwide2 strwide)) mojib) 
-      strwide 0.0 "1/2")
-   (command "text" "J" "br" (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) 
-      strwide 0.0 goukeistr2)
-   (if (= areaselay "<現在層>")(setvar "CLAYER" clay)(setvar "CLAYER" areaselay))   ;罫線
-   (command "line" linept (pt linept yokol 0.0) "")
+   (san_emtext (pt linept (+ colwide1 (- colwide2 strwide)) mojib) strwide 0.0 "1/2" 2 1 hlay)
+   (san_emtext (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) strwide 0.0 goukeistr2 2 1 hlay)
+   (san_emline linept (pt linept yokol 0.0) slay)
    (setq ii (1+ ii))
 
    (setq linept (polar pt1 (* 1.5 pi) (* colheight ii)))
    (setq goukeistr3 (areasRtos (distof goukeistr2) 2 areaclup))
    (repeat areaclup (setq goukeistr3 (strcat goukeistr3 " ")))
-   (if (= areahmlay "<現在層>")(setvar "CLAYER" clay)(setvar "CLAYER" areahmlay))   ;文字
-   (command "text" "J" "br" (pt linept (+ colwide1 (- colwide2 strwide)) mojib) 
-      strwide 0.0 "合計面積（㎡）")
-;
-;   (cyoutext "J" "br" (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) 
-;      strwide 0.0 goukeistr3)
-;
-   (command "text" "J" "br" (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) 
-      strwide 0.0 goukeistr3)
+   (san_emtext (pt linept (+ colwide1 (- colwide2 strwide)) mojib) strwide 0.0 "合計面積（㎡）" 2 1 hlay)
+   (san_emtext (pt linept (+ colwide1 colwide2 (- colwide3 strwide)) mojib) strwide 0.0 goukeistr3 2 1 hlay)
+   (san_emline linept (pt linept yokol 0.0) slay)
 
-   (if (= areaselay "<現在層>")(setvar "CLAYER" clay)(setvar "CLAYER" areaselay))   ;罫線
-   (command "line" linept (pt linept yokol 0.0) "")
-
-   (command "line" ptpt (pt ptpt 0.0 (- (* (+ 4 mm) colheight))) "")
+   (san_emline ptpt (pt ptpt 0.0 (- (* (+ 4 mm) colheight))) slay)
    (setq pt1 (pt ptpt colwide1 0.0))
-   (command "line" pt1 (pt pt1 0.0 (- (* (+ 1 mm) colheight))) "")
+   (san_emline pt1 (pt pt1 0.0 (- (* (+ 1 mm) colheight))) slay)
    (setq pt1 (pt ptpt (+ colwide1 (* 0.5 colwide2)) 0.0 ))
-   (command "line" pt1 (pt pt1 0.0 (- (* (+ 1 mm) colheight))) "")
+   (san_emline pt1 (pt pt1 0.0 (- (* (+ 1 mm) colheight))) slay)
    (setq pt1 (pt ptpt (+ colwide1 colwide2) 0.0 ))
-   (command "line" pt1 (pt pt1 0.0 (- (* (+ 4 mm) colheight))) "")
+   (san_emline pt1 (pt pt1 0.0 (- (* (+ 4 mm) colheight))) slay)
    (setq pt1 (pt ptpt (+ colwide1 colwide2 colwide3) 0.0 ))
-   (command "line" pt1 (pt pt1 0.0 (- (* (+ 4 mm) colheight))) "")
+   (san_emline pt1 (pt pt1 0.0 (- (* (+ 4 mm) colheight))) slay)
+   (princ)
 )
 
 ; 次点指示、範囲カーソル付き
@@ -1658,9 +1654,14 @@
 )
 ;
 ;ini読み出し
-(defun readsanini( / rawlst retlst f buff defl i val)
-   ;iniを読み込み、旧版・破損・空欄フィールドは既定値で補完して
-   ;常に既定と同数の要素を返す(nth 参照でのエラーを防ぐ)  Ver.1.15
+(defun readsanini( / )
+   ;iniはメモリにキャッシュし、毎回ディスクを読まない(描画速度対策)  Ver.1.16
+   (cond (*san_ini_cache*)
+         (T (setq *san_ini_cache* (san_loadini)))
+   )
+)
+;iniを実ファイルから読み込み、旧版・破損・空欄フィールドを既定値で補完  Ver.1.16
+(defun san_loadini( / rawlst retlst f buff defl i val)
    (setq rawlst '())
    (if (findfile (strcat SANSTN "sansya.ini"))
      (progn
@@ -1695,6 +1696,7 @@
       (setq sanlst (cdr sanlst))
    )
    (close f)
+   (setq *san_ini_cache* nil)     ;設定変更を反映するためキャッシュ破棄  Ver.1.16
 )
 ;まだまだあったバグ AREACALVer.2.52から 四捨五入にも問題2段式に変更
 (defun areasRtos(real jp keta / tempstr retstr addketa dz matu karistr)   ;Ver.2.33a追加、rtosをすべて書換

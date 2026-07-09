@@ -22,8 +22,9 @@
 ;  Ver.1.17 2026.07.07 凹形状の三斜分割の無限ループ(砂時計)修正、エラーログ/退化三角形スキップ追加
 ;  Ver.1.18 2026.07.07 既定値を更新、採番を「末尾数字を+1(多文字プレフィックス対応)」に変更
 ;  Ver.1.19 2026.07.07 複数ポリライン選択に対応(まとめて1つの表・通し番号は連続)
+;  Ver.1.20 2026.07.07 1本の分割エラーで全体が止まらないよう捕捉・ログ化(表まで到達)
 ;----------------------------------
-(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.19 2026.7.7")
+(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.20 2026.7.7")
 (setq cfgfname (strcat (substr (getvar "ACADPREFIX") 1 2) "/klib/klib.cfg"))
 (cond
    ((findfile cfgfname)
@@ -314,10 +315,16 @@
    (princ)
 )
 
+;1本のポリラインを三斜分割し行データを返す(エラー捕捉用に分離)  Ver.1.20
+(defun sansya_one( zudata clay arcseg / verlst )
+   (setq verlst (getlwpoarcver_autoseg zudata arcseg))
+   (setq verlst (orderlst verlst))
+   (san_denil (sansyakouji verlst clay))
+)
 ;複数の閉じたポリラインをまとめて三斜分割し、1つの表に集計  Ver.1.19
 ;  通し番号($keynum)は領域をまたいで連続。表は全領域を合算。
 (defun sansyamk_multi( ss / i n ename zudata verlst hyoulst allhyou
-                             oce blp osm ort clay cnt arcseg)
+                             oce blp osm ort clay cnt arcseg res)
    (command "_undo" "BE")
    (setq oce (getvar "CMDECHO"))
    (setq blp (getvar "BLIPMODE"))
@@ -339,11 +346,15 @@
                (= 1 (logand (cond ((cdr (assoc 70 zudata)))(0)) 1)))
         (progn
          (setq arcseg (atof (r-arcseg)))
-         (setq verlst (getlwpoarcver_autoseg zudata arcseg))
-         (setq verlst (orderlst verlst))
-         (setq hyoulst (san_denil (sansyakouji verlst clay)))
-         (setq allhyou (append allhyou hyoulst))
-         (setq cnt (1+ cnt))
+         (setq res (vl-catch-all-apply 'sansya_one (list zudata clay arcseg)))
+         (if (vl-catch-all-error-p res)
+            (san_log (strcat "領域(選択" (itoa (1+ i)) "番目)の三斜分割を中断: "
+                             (vl-catch-all-error-message res)))
+            (progn
+               (setq allhyou (append allhyou res))
+               (setq cnt (1+ cnt))
+            )
+         )
         )
         (san_log (strcat "閉じたポリラインでないためスキップ (選択" (itoa (1+ i)) "番目)"))
       )

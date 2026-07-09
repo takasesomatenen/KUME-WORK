@@ -24,8 +24,9 @@
 ;  Ver.1.19 2026.07.07 複数ポリライン選択に対応(まとめて1つの表・通し番号は連続)
 ;  Ver.1.20 2026.07.07 1本の分割エラーで全体が止まらないよう捕捉・ログ化(表まで到達)
 ;  Ver.1.21 2026.07.07 凹形状の分割を堅牢なイヤークリップに置換(複雑な切欠きでも完走)
+;  Ver.1.22 2026.07.07 円弧分割数に上限、各ポリラインの素性をログ出力(診断)
 ;----------------------------------
-(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.21 2026.7.7")
+(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.22 2026.7.7")
 (setq cfgfname (strcat (substr (getvar "ACADPREFIX") 1 2) "/klib/klib.cfg"))
 (cond
    ((findfile cfgfname)
@@ -343,6 +344,10 @@
    (repeat n
       (setq ename (ssname ss i))
       (setq zudata (entget ename))
+      (san_logf (strcat "領域" (itoa (1+ i)) " 頂点数=" (itoa (san_count10 zudata))
+                        " 閉=" (if (= 1 (logand (cond ((cdr (assoc 70 zudata)))(0)) 1)) "Y" "N")
+                        " 円弧=" (if (san_hasbulge zudata) "有" "無")
+                        " type=" (cdr (assoc 0 zudata))))
       (if (and (= "LWPOLYLINE" (cdr (assoc 0 zudata)))
                (= 1 (logand (cond ((cdr (assoc 70 zudata)))(0)) 1)))
         (progn
@@ -846,6 +851,19 @@
    (foreach x lst (if x (setq r (append r (list x)))))
    r
 )
+(defun san_logf ( msg / f fn )                      ;ログ(ファイルのみ)  Ver.1.22
+   (setq fn (strcat SANSTN "sansya_log.txt"))
+   (if (setq f (open fn "a"))(progn (write-line msg f)(close f)))
+   (princ)
+)
+(defun san_count10 ( zd / c )                       ;頂点(10)数
+   (setq c 0)(foreach x zd (if (= 10 (car x))(setq c (1+ c)))) c
+)
+(defun san_hasbulge ( zd / fl )                     ;円弧(42≠0)の有無
+   (setq fl nil)
+   (foreach x zd (if (and (= 42 (car x))(/= 0.0 (cdr x)))(setq fl T)))
+   fl
+)
 ;三角形描画のラッパ:退化(面積0)はスキップ、エラーは捕捉してログ  Ver.1.17
 (defun sansyadraw ( pt0 pt1 pt2 / res area2 )
    (setq area2 (abs (- (* (- (car pt1)(car pt0))(- (cadr pt2)(cadr pt0)))
@@ -1235,7 +1253,7 @@
             (setq tempnum (abs (/ (* tempang rr) arclen)))
             (if (< tempnum 3.0)                           ;Ver.1.13
                (setq arcseg 3)
-               (setq arcseg (fix tempnum))
+               (setq arcseg (min 200 (fix tempnum)))          ;上限200  Ver.1.22
             )
 ;            (if (< tempnum 8.0)
 ;               (setq arcseg 8)

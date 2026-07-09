@@ -25,8 +25,9 @@
 ;  Ver.1.20 2026.07.07 1本の分割エラーで全体が止まらないよう捕捉・ログ化(表まで到達)
 ;  Ver.1.21 2026.07.07 凹形状の分割を堅牢なイヤークリップに置換(複雑な切欠きでも完走)
 ;  Ver.1.22 2026.07.07 円弧分割数に上限、各ポリラインの素性をログ出力(診断)
+;  Ver.1.23 2026.07.09 集計:BASE書式が読めない記号もAREA属性から救済して集計
 ;----------------------------------
-(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.22 2026.7.7")
+(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.23 2026.7.9")
 (setq cfgfname (strcat (substr (getvar "ACADPREFIX") 1 2) "/klib/klib.cfg"))
 (cond
    ((findfile cfgfname)
@@ -667,7 +668,7 @@
 ;集計工事
 (defun syukei( / vislst m h i j taimin tai imin p newver newvis badlst alllst 
                  hyoulst ii bufflst  oce blp osm clay pt0 pt1 apenaa apenbb newlst buff klst 
-                 aa bb cc sortedlst)
+                 aa bb cc sortedlst okcnt ngcnt)
     (defun apenaa( klst / retstr)
        (setq retstr "")
        (while (/= (car klst) "×")
@@ -729,25 +730,44 @@
       (prompt "\n面積記号が選択されていません")
      (progn
       (setq newlst '())
+      (setq okcnt 0)(setq ngcnt 0)
       (setq sslst (sanssread ss))
       (setq sortedlst (san_ss_sort sslst))
       (while (setq bufflst (car sortedlst))
          (setq buff (nth '2 bufflst))
          (setq klst (knj2lst buff))
          (setq knum (chksuu klst "×"))
-         (if (and (= "2" (car (reverse klst)))(= "÷" (cadr (reverse klst)))(= knum 1))
-           (progn
-            (setq aa (apenaa klst))
-            (setq bb (apenbb klst))
-            (setq cc (car bufflst))
-            (setq newlst (append newlst (list (list aa bb cc))))
-           )
+         (cond
+            ((and (= "2" (car (reverse klst)))(= "÷" (cadr (reverse klst)))(= knum 1))
+               (setq aa (apenaa klst))
+               (setq bb (apenbb klst))
+               (setq cc (car bufflst))
+               (setq newlst (append newlst (list (list aa bb cc))))
+               (setq okcnt (1+ okcnt))
+            )
+            ((> (atof (nth 1 bufflst)) 0.0)          ;BASE書式不正:AREA属性から救済  Ver.1.23
+               (setq cc (car bufflst))
+               (setq newlst (append newlst (list (list (nth 1 bufflst) "1" cc))))
+               (san_log (strcat "記号" cc ": 根拠(BASE)の書式が不正のためAREA属性から集計"))
+               (setq okcnt (1+ okcnt))
+            )
+            (T
+               (san_log (strcat "記号" (car bufflst) ": AREA/BASEとも読み取れずスキップ"))
+               (setq ngcnt (1+ ngcnt))
+            )
          )
          (setq sortedlst (cdr sortedlst))
       )
       (if (= 0 (length newlst))
          (prompt "\n有効な面積記号(AMARK)が見つかりませんでした。")
-         (hyoukouji newlst clay osm)
+         (progn
+            (hyoukouji newlst clay osm)
+            (prompt (strcat "\n" (itoa okcnt) " 個を集計しました。"
+                            (if (> ngcnt 0)
+                               (strcat "(" (itoa ngcnt) " 個は読み取れずスキップ。詳細はsansya_log.txt)")
+                               ""
+                            )))
+         )
       )
      )
    )

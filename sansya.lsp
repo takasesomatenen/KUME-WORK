@@ -23,8 +23,9 @@
 ;  Ver.1.18 2026.07.07 既定値を更新、採番を「末尾数字を+1(多文字プレフィックス対応)」に変更
 ;  Ver.1.19 2026.07.07 複数ポリライン選択に対応(まとめて1つの表・通し番号は連続)
 ;  Ver.1.20 2026.07.07 1本の分割エラーで全体が止まらないよう捕捉・ログ化(表まで到達)
+;  Ver.1.21 2026.07.07 凹形状の分割を堅牢なイヤークリップに置換(複雑な切欠きでも完走)
 ;----------------------------------
-(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.20 2026.7.7")
+(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.21 2026.7.7")
 (setq cfgfname (strcat (substr (getvar "ACADPREFIX") 1 2) "/klib/klib.cfg"))
 (cond
    ((findfile cfgfname)
@@ -451,10 +452,67 @@
    (abs (getvar "AREA"))
 )
 
+(defun san_cross ( p a b )
+   (- (* (- (car b)(car a))(- (cadr p)(cadr a)))
+      (* (- (car p)(car a))(- (cadr b)(cadr a))))
+)
+(defun san_notreflex ( a b c )                    ;反時計回り前提:反射でない
+   (> (- (* (- (car b)(car a))(- (cadr c)(cadr a)))
+         (* (- (car c)(car a))(- (cadr b)(cadr a)))) -1e-9)
+)
+(defun san_pintri ( p a b c / d1 d2 d3 e )        ;pが三角形abc内(厳密)
+   (setq e 1e-9)
+   (setq d1 (san_cross p a b))
+   (setq d2 (san_cross p b c))
+   (setq d3 (san_cross p c a))
+   (or (and (> d1 e)(> d2 e)(> d3 e))
+       (and (< d1 (- e))(< d2 (- e))(< d3 (- e))))
+)
+(defun san_ear_ok ( a b c vl / ok )               ;三角形abc内に他頂点なし
+   (setq ok T)
+   (foreach p vl
+      (if (and ok
+               (not (equal p a 1e-6))(not (equal p b 1e-6))(not (equal p c 1e-6))
+               (san_pintri p a b c))
+         (setq ok nil)
+      )
+   )
+   ok
+)
+;反時計回り頂点リストを三角形(点3つ)のリストに分割(イヤークリップ)  Ver.1.21
+(defun san_earclip ( vl / tris n idx a b c found guard )
+   (setq tris '())
+   (setq n (length vl))
+   (setq guard (+ n 2))
+   (while (and (> n 3)(> guard 0))
+      (setq idx 0 found nil)
+      (while (and (< idx n)(null found))
+         (setq a (nth (rem (+ idx n -1) n) vl))
+         (setq b (nth idx vl))
+         (setq c (nth (rem (1+ idx) n) vl))
+         (if (and (san_notreflex a b c)(san_ear_ok a b c vl))
+            (setq found idx)
+            (setq idx (1+ idx))
+         )
+      )
+      (if (null found)(setq found 0))
+      (setq a (nth (rem (+ found n -1) n) vl))
+      (setq b (nth found vl))
+      (setq c (nth (rem (1+ found) n) vl))
+      (setq tris (cons (list a b c) tris))
+      (setq vl (san_dellst vl found))
+      (setq n (1- n))
+      (setq guard (1- guard))
+   )
+   (if (>= n 3)
+      (setq tris (cons (list (nth 0 vl)(nth 1 vl)(nth 2 vl)) tris))
+   )
+   (reverse tris)
+)
 ;三斜自動作図工事
 (defun sansyakouji( verlst clay / 
                     pnum vislst m h i j taimin tai imin p newver newvis badlst alllst 
-                    hyoulst ii bufflst sg sgmax)
+                    hyoulst ii bufflst sg sgmax tri)
    (setq pnum (length verlst))
    (setq hyoulst '())
    (setq bufflst (readsanini))
@@ -524,56 +582,11 @@
             )
          )
         )
-        (progn                          ;凹ありの場合
-         (setq pplst (minmin_lst verlst 60.0))
-         (while (car pplst)
-            (if (tennasi_flst (car (car pplst)) verlst alllst)
-              (progn
-               (setq pp (car (car pplst)))
-               (setq pplst '())
-              )
-            )
-            (setq pplst (cdr pplst))
-         )
-         (if (null pp)(setq pp 0))                      ;耳が無い時の保険  Ver.1.17
-         (setq hyoulst (append hyoulst (list
-            (sansyadraw_flst  pp verlst)  )))
-         (setq verlst (san_dellst verlst pp))
-         (setq m (length verlst))
-         (while (< 3 m)
-            (setq applst '())
-            (setq mmm 1)
-            (setq sg 0)                                 ;走査ガード  Ver.1.17
-            (setq sgmax (+ 2 (* 2 (length verlst))))    ;全頂点を走査し切る回数
-            (while (and (> 2 (length applst))(< sg sgmax))   ;無限ループ防止  Ver.1.17
-               (setq tempp (+ pp (* (expt -1 mmm)(/ mmm 2))))    ;0 1 -1 2 -2 3 -3
-               (if (tennasi_flst tempp verlst alllst)
-                  (if (< (setq tempk (kakudo tempp verlst)) 180.0)
-                     (setq applst (append applst (list (list tempp (abs (- tempk 60.0))))))
-                  )
-               )
-               (setq mmm (1+ mmm))
-               (setq sg (1+ sg))
-            )
-            (cond                                       ;候補0/1/2で分岐  Ver.1.17
-               ((<= 2 (length applst))
-                  (if (<= (cadr (car applst))(cadr (cadr applst)))    ;60度に近い点を選択
-                     (setq pp (car (car applst)))
-                     (setq pp (car (cadr applst)))
-                  )
-               )
-               ((= 1 (length applst))
-                  (setq pp (car (car applst)))          ;耳が1つ:それを使う
-               )
-               (T (setq pp (1+ pp)))                    ;耳が無い:隣へ進めハング回避
-            )
+        (progn                          ;凹あり/辺上頂点あり:イヤークリップで分割  Ver.1.21
+         (foreach tri (san_earclip verlst)
             (setq hyoulst (append hyoulst (list
-                   (sansyadraw_flst  pp verlst)  )))
-            (setq verlst (san_dellst verlst pp))
-            (setq m (length verlst))
+               (sansyadraw (car tri)(cadr tri)(caddr tri))  )))
          )
-         (setq hyoulst (append hyoulst (list
-            (sansyadraw_flst  pp verlst)  )))
         )
       )
      )

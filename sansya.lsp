@@ -17,8 +17,17 @@
 ;;  Ver.1.12 2011.01.13 集計方法少し変更
 ;;  Ver.1.13 2017.11.08 小円弧分割調整
 ;;  Ver.1.14 2018.08.20 userr1
+;  Ver.1.15 2026.07.07 点指示による境界自動検出(非閉領域対応)、ini堅牢化、選択・集計チェック強化
+;  Ver.1.16 2026.07.07 高速化(iniメモリキャッシュ・レイヤ一覧の再取得削減)
+;  Ver.1.17 2026.07.07 凹形状の三斜分割の無限ループ(砂時計)修正、エラーログ/退化三角形スキップ追加
+;  Ver.1.18 2026.07.07 既定値を更新、採番を「末尾数字を+1(多文字プレフィックス対応)」に変更
+;  Ver.1.19 2026.07.07 複数ポリライン選択に対応(まとめて1つの表・通し番号は連続)
+;  Ver.1.20 2026.07.07 1本の分割エラーで全体が止まらないよう捕捉・ログ化(表まで到達)
+;  Ver.1.21 2026.07.07 凹形状の分割を堅牢なイヤークリップに置換(複雑な切欠きでも完走)
+;  Ver.1.22 2026.07.07 円弧分割数に上限、各ポリラインの素性をログ出力(診断)
+;  Ver.1.23 2026.07.09 集計:BASE書式が読めない記号もAREA属性から救済して集計
 ;----------------------------------
-(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.14 2018.8.20")
+(prompt "SANSYA 三斜面積計算 by T.Sugimoto Ver.1.23 2026.7.9")
 (setq cfgfname (strcat (substr (getvar "ACADPREFIX") 1 2) "/klib/klib.cfg"))
 (cond
    ((findfile cfgfname)
@@ -33,11 +42,13 @@
 )
 ;------------------------------------------------------------
 (defun C:SANSYA( / sansyamh scl zudata zuname kidiaopen what )
+   (vl-load-com)                ;vl-catch-all-* を有効化  Ver.1.17
+   (setq *san_ini_cache* nil)   ;起動毎にini再読込(外部変更に追従)  Ver.1.16
    (if (= nil (tblsearch "BLOCK" "AMARK"))(mk_amark))
    (if (null (tblsearch "LAYER" "AREA1"))(_setlayer "AREA1" "CONTINUOUS" 3))   ;areahulay
    (if (null (tblsearch "LAYER" "AREA2"))(_setlayer "AREA2" "CONTINUOUS" 1))   ;areaselay
    (if (null (tblsearch "LAYER" "AREA3_TXT"))(_setlayer "AREA3_TXT" "CONTINUOUS" 3)) ;areamolay Ver.1.03
-   (if (= nil $keynum)(setq $keynum "1"))
+   (if (= nil $keynum)(setq $keynum "A1"))
    (if (null (findfile (strcat SANSTN "sansya.ini")))
       (setq what (sansyadialog (sandefini)))
       (setq what (sansyadialog (readsanini)))
@@ -54,12 +65,7 @@
    (if (= nil (tblsearch "BLOCK" "AMARK"))(mk_amark))
    (graphscr)
    (cond
-      ((= what 1)
-         (prompt "三斜面積計算を自動作図します。\n閉ポリラインの")
-         (setq zudata (entget (ssname (ssget) 0)))
-         (setq zuname (cdr (assoc 0 zudata)))
-         (if (= zuname "LWPOLYLINE")(sansyamk zudata $keynum))
-      )
+      ((= what 1) (sansyaauto))
       ((= what 2) (kobetukouji))
       ((= what 3) (syukei))
    )
@@ -92,7 +98,7 @@
       )
       flg
    )   
-   (defun actok( / check )
+   (defun actok( / check pl )
       (if (checksuuchi (get_tile "marksize"))
          (if (checksuuchi (get_tile "strwide"))
             (if (checksuuchi (get_tile "colhight"))
@@ -106,7 +112,7 @@
                                  (alert "円弧分割長に数値を入力してください")
                               )
                               (alert "表示桁数に数値を入力してください")
-                           )      
+                           )
                            (alert "図形内寸法文字の大きさに数値を入力してください")
                         )
                         (alert "面積セルの巾に数値を入力してください")
@@ -123,29 +129,30 @@
       )
       (if check
         (progn
+         (setq pl (cplaylst))                    ;レイヤ一覧は1回だけ取得  Ver.1.16
          (if (get_tile "areakulay")
-            (setq kulay (nth (atoi (get_tile "areakulay"))(cplaylst)))
-            (setq kulay (car (cplaylst)))
+            (setq kulay (nth (atoi (get_tile "areakulay")) pl))
+            (setq kulay (car pl))
          )
          (if (get_tile "areahulay")
-            (setq hulay (nth (atoi (get_tile "areahulay"))(cplaylst)))
-            (setq hulay (car (cplaylst)))
+            (setq hulay (nth (atoi (get_tile "areahulay")) pl))
+            (setq hulay (car pl))
          )
          (if (get_tile "areamolay")
-            (setq molay (nth (atoi (get_tile "areamolay"))(cplaylst)))
-            (setq molay (car (cplaylst)))
+            (setq molay (nth (atoi (get_tile "areamolay")) pl))
+            (setq molay (car pl))
          )
          (if (get_tile "areaselay")
-            (setq selay (nth (atoi (get_tile "areaselay"))(cplaylst)))
-            (setq selay (car (cplaylst)))
+            (setq selay (nth (atoi (get_tile "areaselay")) pl))
+            (setq selay (car pl))
          )
          (if (get_tile "areatalay")
-            (setq talay (nth (atoi (get_tile "areatalay"))(cplaylst)))
-            (setq talay (car (cplaylst)))
+            (setq talay (nth (atoi (get_tile "areatalay")) pl))
+            (setq talay (car pl))
          )
          (if (get_tile "areahmlay")
-            (setq hmlay (nth (atoi (get_tile "areahmlay"))(cplaylst)))
-            (setq hmlay (car (cplaylst)))
+            (setq hmlay (nth (atoi (get_tile "areahmlay")) pl))
+            (setq hmlay (car pl))
          )
          (setq retlst '())
          (setq retlst (append retlst (list (get_tile "marksize"))))
@@ -174,9 +181,10 @@
    (defun actok2( / ) (actok) (done_dialog 2))     ;iniを書き込んで閉じる
    (defun actok3( / ) (actok) (done_dialog 3))     ;iniを書き込んで閉じる
 
-   (defun actdef( / ) (actdisp (sandefini)) )
+   (defun actdef( / ) (setq $keynum "A1")(actdisp (sandefini)) )
 
-   (defun actdisp( lst / )
+   (defun actdisp( lst / pl )
+      (setq pl (cplaylst))                       ;レイヤ一覧は1回だけ取得  Ver.1.16
       (set_tile "marksize"  (nth 0 lst))
       (set_tile "strwide"   (nth 1 lst))
       (set_tile "colhight"  (nth 2 lst))
@@ -195,45 +203,45 @@
          ((= (nth 9 lst) "kiri_sute") (set_tile "areakiri" "kiri_sute"))
       )
       (set_tile "arcseg"   (nth 10 lst))
-      
+
       (start_list "areakulay")
-      (mapcar 'add_list (cplaylst))
+      (mapcar 'add_list pl)
       (end_list)
-      (if (setq buff (icchiban (cplaylst) (nth 11 lst)))
+      (if (setq buff (icchiban pl (nth 11 lst)))
          (set_tile "areakulay" (itoa buff))
       )
 
       (start_list "areahulay")
-      (mapcar 'add_list (cplaylst))
+      (mapcar 'add_list pl)
       (end_list)
-      (if (setq buff (icchiban (cplaylst) (nth 12 lst)))
+      (if (setq buff (icchiban pl (nth 12 lst)))
          (set_tile "areahulay" (itoa buff))
       )
 
       (start_list "areamolay")
-      (mapcar 'add_list (cplaylst))
+      (mapcar 'add_list pl)
       (end_list)
-      (if (setq buff (icchiban (cplaylst) (nth 13 lst)))
+      (if (setq buff (icchiban pl (nth 13 lst)))
          (set_tile "areamolay" (itoa buff))
       )
 
       (start_list "areaselay")
-      (mapcar 'add_list (cplaylst))
+      (mapcar 'add_list pl)
       (end_list)
-      (if (setq buff (icchiban (cplaylst) (nth 14 lst)))
+      (if (setq buff (icchiban pl (nth 14 lst)))
          (set_tile "areaselay" (itoa buff))
       )
 
       (start_list "areatalay")
-      (mapcar 'add_list (cplaylst))
+      (mapcar 'add_list pl)
       (end_list)
-      (if (setq buff (icchiban (cplaylst) (nth 15 lst)))
+      (if (setq buff (icchiban pl (nth 15 lst)))
          (set_tile "areatalay" (itoa buff))
       )
       (start_list "areahmlay")
-      (mapcar 'add_list (cplaylst))
+      (mapcar 'add_list pl)
       (end_list)
-      (if (setq buff (icchiban (cplaylst) (nth 16 lst)))
+      (if (setq buff (icchiban pl (nth 16 lst)))
          (set_tile "areahmlay" (itoa buff))
       )
       (set_tile "hugonum" $keynum)
@@ -277,9 +285,10 @@
      (progn
       (setq verlst (getlwpoarcver_autoseg zudata arcseg))
       (setq verlst (orderlst verlst))
-      (setq hyoulst (sansyakouji  verlst clay ))
+      (setq hyoulst (san_denil (sansyakouji  verlst clay )))
       (hyoukouji  hyoulst clay osm )
      )
+     (prompt "\n閉じたポリラインではないため処理できません。")
    )
    (setvar "CLAYER" clay)
    (setvar "BLIPMODE" blp)
@@ -289,10 +298,227 @@
    (command "_undo" "E")
 )
 
+
+;三斜自動作図(閉ポリライン選択 または 領域内の点指示)  Ver.1.15
+;  閉じた図形を選択すれば従来どおり。何も選ばず点を指示すると、
+;  線分・円弧・ポリライン等で囲まれた領域(添付図のような割線で区切られた
+;  領域)でも、BOUNDARYで境界を自動検出して三斜計算できる。
+(defun sansyaauto( / ss)
+   (prompt "\n三斜計算する閉じたポリラインを選択(複数可、Enterで確定)。")
+   (setq ss (ssget '((0 . "LWPOLYLINE"))))
+   (if ss
+      (sansyamk_multi ss)
+      (progn
+         (initget "Yes No")
+         (if (= "Yes" (getkword "\n図形が未選択です。点指示モードにしますか? [Yes/No] <No>: "))
+            (sansyabypoint)
+         )
+      )
+   )
+   (princ)
+)
+
+;1本のポリラインを三斜分割し行データを返す(エラー捕捉用に分離)  Ver.1.20
+(defun sansya_one( zudata clay arcseg / verlst )
+   (setq verlst (getlwpoarcver_autoseg zudata arcseg))
+   (setq verlst (orderlst verlst))
+   (san_denil (sansyakouji verlst clay))
+)
+;複数の閉じたポリラインをまとめて三斜分割し、1つの表に集計  Ver.1.19
+;  通し番号($keynum)は領域をまたいで連続。表は全領域を合算。
+(defun sansyamk_multi( ss / i n ename zudata verlst hyoulst allhyou
+                             oce blp osm ort clay cnt arcseg res)
+   (command "_undo" "BE")
+   (setq oce (getvar "CMDECHO"))
+   (setq blp (getvar "BLIPMODE"))
+   (setq osm (getvar "OSMODE"))
+   (setq ort (getvar "ORTHOMODE"))
+   (setvar "CMDECHO" 0)
+   (setvar "BLIPMODE" 0)
+   (setvar "OSMODE" 0)
+   (setvar "ORTHOMODE" 0)
+   (setq clay (getvar "CLAYER"))
+   (setq allhyou '())
+   (setq cnt 0)
+   (setq n (sslength ss))
+   (setq i 0)
+   (repeat n
+      (setq ename (ssname ss i))
+      (setq zudata (entget ename))
+      (san_logf (strcat "領域" (itoa (1+ i)) " 頂点数=" (itoa (san_count10 zudata))
+                        " 閉=" (if (= 1 (logand (cond ((cdr (assoc 70 zudata)))(0)) 1)) "Y" "N")
+                        " 円弧=" (if (san_hasbulge zudata) "有" "無")
+                        " type=" (cdr (assoc 0 zudata))))
+      (if (and (= "LWPOLYLINE" (cdr (assoc 0 zudata)))
+               (= 1 (logand (cond ((cdr (assoc 70 zudata)))(0)) 1)))
+        (progn
+         (setq arcseg (atof (r-arcseg)))
+         (setq res (vl-catch-all-apply 'sansya_one (list zudata clay arcseg)))
+         (if (vl-catch-all-error-p res)
+            (san_log (strcat "領域(選択" (itoa (1+ i)) "番目)の三斜分割を中断: "
+                             (vl-catch-all-error-message res)))
+            (progn
+               (setq allhyou (append allhyou res))
+               (setq cnt (1+ cnt))
+            )
+         )
+        )
+        (san_log (strcat "閉じたポリラインでないためスキップ (選択" (itoa (1+ i)) "番目)"))
+      )
+      (setq i (1+ i))
+   )
+   (if allhyou
+      (hyoukouji allhyou clay osm)               ;全領域をまとめて1つの表に
+      (prompt "\n作図対象の閉じたポリラインがありませんでした。")
+   )
+   (setvar "CLAYER" clay)
+   (setvar "OSMODE" osm)
+   (setvar "BLIPMODE" blp)
+   (setvar "CMDECHO" oce)
+   (setvar "ORTHOMODE" ort)
+   (command "_undo" "E")
+   (prompt (strcat "\n" (itoa cnt) " 個の閉じたポリラインを処理し、1つの表にまとめました。"))
+   (princ)
+)
+
+;点指示で境界を自動検出して三斜作図  Ver.1.15
+;  各領域の内側を順にクリックすると、その領域ごとに三斜分割・作表する。
+(defun sansyabypoint( / pt created bpl bzudata cnt osm blp oce ort clay0 e)
+   (setq oce (getvar "CMDECHO"))
+   (setq blp (getvar "BLIPMODE"))
+   (setq osm (getvar "OSMODE"))
+   (setq ort (getvar "ORTHOMODE"))
+   (setq clay0 (getvar "CLAYER"))
+   (setvar "CMDECHO" 0)
+   (setvar "BLIPMODE" 0)
+   (setvar "OSMODE" 0)
+   (command "_undo" "BE")
+   (setq cnt 0)
+   (prompt "\n区切られた各領域の内側を順に指示してください(Enter/ESCで終了)。")
+   (while (setq pt (getpoint "\n領域内の点を指示 <終了>: "))
+      (setq created (sansya_makeboundary pt))
+      (if created
+        (progn
+         (setq bpl (car created))
+         (foreach e created
+            (if (> (sansya_entarea e)(sansya_entarea bpl))(setq bpl e))
+         )
+         (setq bzudata (entget bpl))
+         (if (and (= "LWPOLYLINE" (cdr (assoc 0 bzudata)))
+                  (= 1 (logand (cond ((cdr (assoc 70 bzudata)))(0)) 1)))
+           (progn
+            (foreach e created (entdel e))          ;一時境界線を消去してから作図
+            (sansyamk bzudata $keynum)
+            (setq cnt (1+ cnt))
+            (prompt (strcat "\n" (itoa cnt) " 領域目を作図しました。"))
+           )
+           (progn
+            (foreach e created (entdel e))
+            (prompt "\n閉じた境界を検出できませんでした。")
+           )
+         )
+        )
+         (prompt "\n境界を検出できませんでした。閉じた領域の内側を指示してください。")
+      )
+   )
+   (setvar "CLAYER" clay0)
+   (setvar "OSMODE" osm)
+   (setvar "BLIPMODE" blp)
+   (setvar "CMDECHO" oce)
+   (setvar "ORTHOMODE" ort)
+   (command "_undo" "E")
+   (if (< 0 cnt)
+      (prompt (strcat "\n計 " (itoa cnt) " 領域を処理しました。"))
+      (prompt "\n処理された領域はありません。")
+   )
+   (princ)
+)
+
+;指示点を囲む境界をBOUNDARYで生成し、作成エンティティのリストを返す  Ver.1.15
+(defun sansya_makeboundary( pt / before after created e)
+   (setq before (entlast))
+   (command "_.-boundary" pt "")
+   (setq after (entlast))
+   (setq created '())
+   (if (and after (not (eq after before)))
+      (progn
+         (setq e (if before (entnext before) (entnext)))
+         (while e
+            (setq created (append created (list e)))
+            (setq e (entnext e))
+         )
+      )
+   )
+   created
+)
+
+;エンティティの面積(絶対値)を返す  Ver.1.15
+(defun sansya_entarea( e / )
+   (command "_.area" "_O" e)
+   (abs (getvar "AREA"))
+)
+
+(defun san_cross ( p a b )
+   (- (* (- (car b)(car a))(- (cadr p)(cadr a)))
+      (* (- (car p)(car a))(- (cadr b)(cadr a))))
+)
+(defun san_notreflex ( a b c )                    ;反時計回り前提:反射でない
+   (> (- (* (- (car b)(car a))(- (cadr c)(cadr a)))
+         (* (- (car c)(car a))(- (cadr b)(cadr a)))) -1e-9)
+)
+(defun san_pintri ( p a b c / d1 d2 d3 e )        ;pが三角形abc内(厳密)
+   (setq e 1e-9)
+   (setq d1 (san_cross p a b))
+   (setq d2 (san_cross p b c))
+   (setq d3 (san_cross p c a))
+   (or (and (> d1 e)(> d2 e)(> d3 e))
+       (and (< d1 (- e))(< d2 (- e))(< d3 (- e))))
+)
+(defun san_ear_ok ( a b c vl / ok )               ;三角形abc内に他頂点なし
+   (setq ok T)
+   (foreach p vl
+      (if (and ok
+               (not (equal p a 1e-6))(not (equal p b 1e-6))(not (equal p c 1e-6))
+               (san_pintri p a b c))
+         (setq ok nil)
+      )
+   )
+   ok
+)
+;反時計回り頂点リストを三角形(点3つ)のリストに分割(イヤークリップ)  Ver.1.21
+(defun san_earclip ( vl / tris n idx a b c found guard )
+   (setq tris '())
+   (setq n (length vl))
+   (setq guard (+ n 2))
+   (while (and (> n 3)(> guard 0))
+      (setq idx 0 found nil)
+      (while (and (< idx n)(null found))
+         (setq a (nth (rem (+ idx n -1) n) vl))
+         (setq b (nth idx vl))
+         (setq c (nth (rem (1+ idx) n) vl))
+         (if (and (san_notreflex a b c)(san_ear_ok a b c vl))
+            (setq found idx)
+            (setq idx (1+ idx))
+         )
+      )
+      (if (null found)(setq found 0))
+      (setq a (nth (rem (+ found n -1) n) vl))
+      (setq b (nth found vl))
+      (setq c (nth (rem (1+ found) n) vl))
+      (setq tris (cons (list a b c) tris))
+      (setq vl (san_dellst vl found))
+      (setq n (1- n))
+      (setq guard (1- guard))
+   )
+   (if (>= n 3)
+      (setq tris (cons (list (nth 0 vl)(nth 1 vl)(nth 2 vl)) tris))
+   )
+   (reverse tris)
+)
 ;三斜自動作図工事
 (defun sansyakouji( verlst clay / 
                     pnum vislst m h i j taimin tai imin p newver newvis badlst alllst 
-                    hyoulst ii bufflst)
+                    hyoulst ii bufflst sg sgmax tri)
    (setq pnum (length verlst))
    (setq hyoulst '())
    (setq bufflst (readsanini))
@@ -362,44 +588,11 @@
             )
          )
         )
-        (progn                          ;凹ありの場合
-         (setq pplst (minmin_lst verlst 60.0))
-         (while (car pplst)
-            (if (tennasi_flst (car (car pplst)) verlst alllst)
-              (progn
-               (setq pp (car (car pplst)))
-               (setq pplst '())
-              )
-            )
-            (setq pplst (cdr pplst))
-         )
-         (setq hyoulst (append hyoulst (list
-            (sansyadraw_flst  pp verlst)  )))
-         (setq verlst (san_dellst verlst pp))
-         (setq m (length verlst))
-         (while (< 3 m)
-            (setq applst '())
-            (setq mmm 1)
-            (while (> 2 (length applst))
-               (setq tempp (+ pp (* (expt -1 mmm)(/ mmm 2))))    ;0 1 -1 2 -2 3 -3 
-               (if (tennasi_flst tempp verlst alllst)
-                  (if (< (setq tempk (kakudo tempp verlst)) 180.0)
-                     (setq applst (append applst (list (list tempp (abs (- tempk 60.0))))))
-                  )
-               )
-               (setq mmm (1+ mmm))
-            )
-            (if (<= (cadr (car applst))(cadr (cadr applst)))    ;60度に近い点を選択
-               (setq pp (car (car applst)))
-               (setq pp (car (cadr applst)))
-            )
+        (progn                          ;凹あり/辺上頂点あり:イヤークリップで分割  Ver.1.21
+         (foreach tri (san_earclip verlst)
             (setq hyoulst (append hyoulst (list
-                   (sansyadraw_flst  pp verlst)  )))
-            (setq verlst (san_dellst verlst pp))
-            (setq m (length verlst))
+               (sansyadraw (car tri)(cadr tri)(caddr tri))  )))
          )
-         (setq hyoulst (append hyoulst (list
-            (sansyadraw_flst  pp verlst)  )))
         )
       )
      )
@@ -409,7 +602,7 @@
 
 ;三斜個別作図工事
 (defun kobetukouji( / vislst m h i j taimin tai imin p newver newvis badlst alllst 
-                      hyoulst ii bufflst  oce blp osm clay loop pt0 pt1 pt2)
+                      hyoulst ii bufflst  oce blp osm clay loop pt0 pt1 pt2 cnt)
    (command "_undo" "BE")
    (setq oce (getvar "CMDECHO"))
    (setq blp (getvar "BLIPMODE"))
@@ -432,9 +625,11 @@
    (setq areaselay  (nth 14 bufflst))         ; "表罫線字"
    (setq areatalay  (nth 15 bufflst))         ; "区分高さ画層"
 
+   (prompt "\n三斜個別作図：三角形の3点を順に指示します(1点目でEnter/ESCで終了)。")
+   (setq cnt 0)
    (setq loop T)
    (while loop
-      (setq pt0 (getpoint "\n一点目を指示："))
+      (setq pt0 (getpoint "\n1点目を指示 <終了>: "))
       (if (/= pt0 nil)
         (progn
          (setq pt1 (getpoint pt0 "\n二点目を指示："))
@@ -446,6 +641,8 @@
                (setvar "OSMODE" 0)
                (sansyadraw pt0 pt1 pt2)
                (setvar "OSMODE" osm)
+               (setq cnt (1+ cnt))
+               (prompt (strcat "\n" (itoa cnt) " 個目の三角形を作図しました。"))
               )
                (setq loop nil)
             )
@@ -455,6 +652,10 @@
         )
          (setq loop nil)
       )
+   )
+   (if (< 0 cnt)
+      (prompt (strcat "\n計 " (itoa cnt) " 個の三角形を作図しました。"))
+      (prompt "\n三角形は作図されませんでした。")
    )
    (setvar "CLAYER" clay)
    (setvar "BLIPMODE" blp)
@@ -467,7 +668,7 @@
 ;集計工事
 (defun syukei( / vislst m h i j taimin tai imin p newver newvis badlst alllst 
                  hyoulst ii bufflst  oce blp osm clay pt0 pt1 apenaa apenbb newlst buff klst 
-                 aa bb cc sortedlst)
+                 aa bb cc sortedlst okcnt ngcnt)
     (defun apenaa( klst / retstr)
        (setq retstr "")
        (while (/= (car klst) "×")
@@ -529,23 +730,45 @@
       (prompt "\n面積記号が選択されていません")
      (progn
       (setq newlst '())
+      (setq okcnt 0)(setq ngcnt 0)
       (setq sslst (sanssread ss))
       (setq sortedlst (san_ss_sort sslst))
       (while (setq bufflst (car sortedlst))
          (setq buff (nth '2 bufflst))
          (setq klst (knj2lst buff))
          (setq knum (chksuu klst "×"))
-         (if (and (= "2" (car (reverse klst)))(= "÷" (cadr (reverse klst)))(= knum 1))
-           (progn
-            (setq aa (apenaa klst))
-            (setq bb (apenbb klst))
-            (setq cc (car bufflst))
-            (setq newlst (append newlst (list (list aa bb cc))))
-           )
+         (cond
+            ((and (= "2" (car (reverse klst)))(= "÷" (cadr (reverse klst)))(= knum 1))
+               (setq aa (apenaa klst))
+               (setq bb (apenbb klst))
+               (setq cc (car bufflst))
+               (setq newlst (append newlst (list (list aa bb cc))))
+               (setq okcnt (1+ okcnt))
+            )
+            ((> (atof (nth 1 bufflst)) 0.0)          ;BASE書式不正:AREA属性から救済  Ver.1.23
+               (setq cc (car bufflst))
+               (setq newlst (append newlst (list (list (nth 1 bufflst) "1" cc))))
+               (san_log (strcat "記号" cc ": 根拠(BASE)の書式が不正のためAREA属性から集計"))
+               (setq okcnt (1+ okcnt))
+            )
+            (T
+               (san_log (strcat "記号" (car bufflst) ": AREA/BASEとも読み取れずスキップ"))
+               (setq ngcnt (1+ ngcnt))
+            )
          )
          (setq sortedlst (cdr sortedlst))
       )
-      (hyoukouji newlst clay osm)
+      (if (= 0 (length newlst))
+         (prompt "\n有効な面積記号(AMARK)が見つかりませんでした。")
+         (progn
+            (hyoukouji newlst clay osm)
+            (prompt (strcat "\n" (itoa okcnt) " 個を集計しました。"
+                            (if (> ngcnt 0)
+                               (strcat "(" (itoa ngcnt) " 個は読み取れずスキップ。詳細はsansya_log.txt)")
+                               ""
+                            )))
+         )
+      )
      )
    )
    (setvar "CLAYER" clay)
@@ -633,7 +856,59 @@
    (sansyadraw (nth p ptlst)(nth q ptlst)(nth r ptlst))
 )
 
-(defun sansyadraw ( pt0 pt1 pt2 / wd0 wd1 wd2
+(defun san_log ( msg / f fn )                       ;ログ出力  Ver.1.17
+   (setq fn (strcat SANSTN "sansya_log.txt"))
+   (if (setq f (open fn "a"))
+      (progn (write-line msg f)(close f))
+   )
+   (prompt (strcat "\n[SANSYA] " msg))
+   (princ)
+)
+(defun san_ptstr ( p )                              ;点の文字列化
+   (strcat "(" (rtos (car p) 2 1) "," (rtos (cadr p) 2 1) ")")
+)
+(defun san_denil ( lst / r )                        ;nilを除いたリスト
+   (foreach x lst (if x (setq r (append r (list x)))))
+   r
+)
+(defun san_logf ( msg / f fn )                      ;ログ(ファイルのみ)  Ver.1.22
+   (setq fn (strcat SANSTN "sansya_log.txt"))
+   (if (setq f (open fn "a"))(progn (write-line msg f)(close f)))
+   (princ)
+)
+(defun san_count10 ( zd / c )                       ;頂点(10)数
+   (setq c 0)(foreach x zd (if (= 10 (car x))(setq c (1+ c)))) c
+)
+(defun san_hasbulge ( zd / fl )                     ;円弧(42≠0)の有無
+   (setq fl nil)
+   (foreach x zd (if (and (= 42 (car x))(/= 0.0 (cdr x)))(setq fl T)))
+   fl
+)
+;三角形描画のラッパ:退化(面積0)はスキップ、エラーは捕捉してログ  Ver.1.17
+(defun sansyadraw ( pt0 pt1 pt2 / res area2 )
+   (setq area2 (abs (- (* (- (car pt1)(car pt0))(- (cadr pt2)(cadr pt0)))
+                       (* (- (car pt2)(car pt0))(- (cadr pt1)(cadr pt0))))))
+   (cond
+      ((< area2 1e-6)
+         (san_log (strcat "退化三角形をスキップ "
+                          (san_ptstr pt0)(san_ptstr pt1)(san_ptstr pt2)))
+         nil
+      )
+      (T
+         (setq res (vl-catch-all-apply 'sansyadraw_raw (list pt0 pt1 pt2)))
+         (if (vl-catch-all-error-p res)
+            (progn
+               (san_log (strcat "描画エラー: " (vl-catch-all-error-message res) " @ "
+                                (san_ptstr pt0)(san_ptstr pt1)(san_ptstr pt2)))
+               nil
+            )
+            res
+         )
+      )
+   )
+)
+
+(defun sansyadraw_raw ( pt0 pt1 pt2 / wd0 wd1 wd2
                     l0 l1 l2 ll ang0 ppt0 ppt1 ppt2 kouten cyupt s-attreg s-attdia )
    (setq l0 (distance pt0 pt1))
    (setq l1 (distance pt1 pt2))
@@ -689,41 +964,34 @@
    (list wd0 wd1 wd2)    ;底辺 高さ キー番号の文字列リストを返す
 )
 
-(defun incban( numstr / ascinc ret)
-   (defun ascinc(asc / dic retasc)
-      (setq dic (ascii asc))
+(defun incban( numstr / incchar len i prefix np ret )
+   ;末尾の数字部分を+1、その手前の文字列(何文字でも)はそのまま  Ver.1.18
+   ; 例: A1->A2  AA1->AA2  AB1->AB2  1->2  A->B  AA->AB
+   (defun incchar( a / dic )
+      (setq dic (ascii a))
       (cond
-         ((and (<= 90 dic)(<= dic 96))(setq retasc (chr 97)))
-         ((and (<= 122 dic)(<= dic 127))(setq retasc (chr 65)))
-         (T (setq retasc (chr (1+ dic))))
+         ((and (<= 90 dic)(<= dic 96))(chr 97))     ; Z等 -> a
+         ((and (<= 122 dic)(<= dic 127))(chr 65))   ; z等 -> A
+         (T (chr (1+ dic)))
       )
-      retasc
    )
-;-------------------------------   
-   (if (> (atoi numstr) 0)
-     (progn
-      (setq ret (itoa (1+ (atoi numstr))))
-     )
-     (progn
-      (if (= 1 (strlen numstr))
-        (progn
-         (setq ret (ascinc numstr))
-        )
-        (progn
-         (setq hnum (substr numstr 1 1))
-         (setq subnum (substr numstr 2))
-         (if subnum
-           (progn
-            (setq subatno (atoi subnum))
-            (if (> subatno 0)
-               (setq ret (strcat hnum (itoa (+ (atoi subnum) 1))))
-               (setq ret (strcat hnum (ascinc subnum)))
-            )
-           )
-         )
-        )
+   (if (or (null numstr)(= numstr ""))(setq numstr "1"))
+   (setq len (strlen numstr))
+   (setq i len)
+   (while (and (> i 0)
+               (<= 48 (ascii (substr numstr i 1)))
+               (>= 57 (ascii (substr numstr i 1))))
+      (setq i (1- i))                         ; 末尾の数字列の先頭直前まで戻す
+   )
+   (setq prefix (substr numstr 1 i))          ; 数字より前(空可)
+   (setq np (substr numstr (1+ i)))           ; 末尾の数字列(空可)
+   (if (> (strlen np) 0)
+      (setq ret (strcat prefix (itoa (1+ (atoi np)))))   ; 数字部を+1
+      (if (= len 0)                                       ; 数字なし=英字扱い
+         (setq ret "1")
+         (setq ret (strcat (substr numstr 1 (1- len))
+                           (incchar (substr numstr len 1))))
       )
-     )
    )
    ret
 )
@@ -1005,7 +1273,7 @@
             (setq tempnum (abs (/ (* tempang rr) arclen)))
             (if (< tempnum 3.0)                           ;Ver.1.13
                (setq arcseg 3)
-               (setq arcseg (fix tempnum))
+               (setq arcseg (min 200 (fix tempnum)))          ;上限200  Ver.1.22
             )
 ;            (if (< tempnum 8.0)
 ;               (setq arcseg 8)
@@ -1540,24 +1808,42 @@
 (defun r-areakiri( / )   (nth 9 (readsanini)))
 (defun r-arcseg( / )     (nth 10 (readsanini)))
 (defun sandefini( / )
-   '("7.0" "3.0" "6.0" "10.0" "80.0" "40.0" "sunpari" "2.5" "3" "kiri_shisya" "1000"
-     "AREA2" "AREA1" "AREA3_TXT" "AREA2" "AREA2" "AREA3_TXT" )   ;Ver.1.03
+   '("600" "80" "200" "500" "1000" "1000" "sunpari" "200" "2" "kiri_shisya" "1000"
+     "AREA2" "AREA1" "AREA3_TXT" "AREA2" "AREA2" "AREA3_TXT" )   ;Ver.1.18 既定値更新
 )
 ;
 ;ini読み出し
-(defun readsanini( / retlst f)
-   (setq retlst '())
+(defun readsanini( / )
+   ;iniはメモリにキャッシュし、毎回ディスクを読まない(描画速度対策)  Ver.1.16
+   (cond (*san_ini_cache*)
+         (T (setq *san_ini_cache* (san_loadini)))
+   )
+)
+;iniを実ファイルから読み込み、旧版・破損・空欄フィールドを既定値で補完  Ver.1.16
+(defun san_loadini( / rawlst retlst f buff defl i val)
+   (setq rawlst '())
    (if (findfile (strcat SANSTN "sansya.ini"))
      (progn
       (if (setq f (open (strcat SANSTN "sansya.ini") "r"))
         (progn
          (while (setq buff (read-line f))
-            (setq retlst (append retlst (list buff)))
+            (setq rawlst (append rawlst (list buff)))
          )
          (close f)
         )
       )
      )
+   )
+   (setq defl (sandefini))
+   (setq retlst '())
+   (setq i 0)
+   (repeat (length defl)
+      (setq val (nth i rawlst))
+      (if (or (null val)(= val ""))
+         (setq val (nth i defl))
+      )
+      (setq retlst (append retlst (list val)))
+      (setq i (1+ i))
    )
    retlst
 )
@@ -1569,6 +1855,7 @@
       (setq sanlst (cdr sanlst))
    )
    (close f)
+   (setq *san_ini_cache* nil)     ;設定変更を反映するためキャッシュ破棄  Ver.1.16
 )
 ;まだまだあったバグ AREACALVer.2.52から 四捨五入にも問題2段式に変更
 (defun areasRtos(real jp keta / tempstr retstr addketa dz matu karistr)   ;Ver.2.33a追加、rtosをすべて書換
